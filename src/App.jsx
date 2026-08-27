@@ -602,7 +602,7 @@ function CalendarPage({profile}){
   const can=role==='admin'||isHead(role)
 
   return <div>
-    <section className="page-head"><div><div className="eyebrow">PLANNING</div><h1>Team calendar</h1><p>{staff?'Your assigned schedule.':'Create and review coverage, deadlines and sessions.'}</p></div>
+    <section className="page-head"><div><div className="eyebrow">PLANNING</div><h1>TEAM CALENDAR</h1><p>{staff?'Your assigned schedule.':'Create and review coverage, deadlines and sessions.'}</p></div>
       <div style={{display:'flex',gap:8}}>
         {(effMode==='hours'||effMode==='all') && canCreateSchedule(role) && <button className="primary-btn" onClick={()=>setOpenSchedule(true)}><Plus size={17}/> New event</button>}
         {(effMode==='tasks'||effMode==='all') && canCreateTask(role) && <button className="primary-btn" onClick={()=>setOpenTask(true)}><Plus size={17}/> New task</button>}
