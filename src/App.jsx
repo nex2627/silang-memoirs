@@ -4,7 +4,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, PenLine, CheckCircle2, AlertCircle, Sparkles, ExternalLink, ChevronRight,
   ChevronLeft, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
-  Download, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
+  Download, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 } from 'lucide-react'
 
 /* ---------------- Config ---------------- */
@@ -39,7 +39,8 @@ function roleDept(role){ return ROLE_META[role]?.dept || null }
 function roleMode(role){ return ROLE_META[role]?.mode || 'admin' }
 function isTD(role){ return role==='head_colorist' }
 function canCreateTask(role){ return isAdminLike(role) || isTD(role) }
-function canCreateSchedule(role){ return isAdminLike(role) || role==='head_media' }
+function canCreateSchedule(role){ return isAdminLike(role) || ['head_media','head_colorist','art_director'].includes(role) } // the whole board can set up events
+function isBoard(role){ return ['eic','head_colorist','art_director','head_media'].includes(role) }
 function canManageAccounts(role){ return role==='admin' }
 // Which task departments a role can see / manage as a whole (workers only ever see their own).
 function managedTaskDepts(role){ if(isAdminLike(role)) return DEPARTMENTS.filter(d=>DEPT_MODE[d]==='tasks'); if(isTD(role)) return TASK_ASSIGNEE_DEPTS; return [] }
@@ -51,6 +52,14 @@ function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digi
 function roleRank(role){ if(role==='admin') return 0; if(role==='eic') return 1; if(role==='art_director') return 2; if(isHead(role)) return 3; return 4 }
 function fmtDay(d,withYear=true){ if(!d) return '—'; const x=d instanceof Date?d:new Date(d.length===10?d+'T00:00:00':d); if(isNaN(x)) return '—'; return x.toLocaleDateString([], withYear?{weekday:'short',month:'short',day:'numeric',year:'numeric'}:{weekday:'short',month:'short',day:'numeric'}) }
 function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+// Button that stays neutral, lights up on hover, and turns green with a check once it has been pressed.
+function ActionButton({label,doneLabel,run,after,className=''}){
+  const [st,setSt]=useState('idle')
+  async function go(){ if(st!=='idle') return; setSt('busy'); let r; try{ r=await run() }catch(e){ r={error:e} } if(r&&r.error){ notifyDialog(r.error.message||'Something went wrong.'); setSt('idle'); return } setSt('done'); setTimeout(()=>{ after&&after() },750) }
+  return <button type="button" className={`act-btn ${st} ${className}`} onClick={go} disabled={st!=='idle'}>
+    {st==='busy'?<span className="loader-ring" style={{width:12,height:12,borderWidth:2}}/>:st==='done'?<><Check size={14}/> {doneLabel||label}</>:label}
+  </button>
+}
 function usePoll(fn,ms=30000){ const ref=useRef(fn); ref.current=fn; useEffect(()=>{ const t=setInterval(()=>ref.current(),ms); const vis=()=>{ if(document.visibilityState==='visible') ref.current() }; document.addEventListener('visibilitychange',vis); return ()=>{ clearInterval(t); document.removeEventListener('visibilitychange',vis) } },[]) }
 // ---- Date field: type the numbers (10/25/2026, 2026-10-25, 102526 …) or tap the calendar icon.
 function parseDateText(txt){
@@ -416,13 +425,13 @@ function MyTasksPanel({profile}){
   const [rows,setRows]=useState([])
   async function load(){ const {data}=await supabase.from('tasks').select('*').eq('assigned_to',profile.id).neq('status','completed').order('created_at',{ascending:false}); setRows(data||[]) }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
-  async function done(id){ await supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id); load() }
+  const done=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
   if(!rows.length) return null
   return <div className="panel task-panel" style={{marginBottom:14}}>
     <div className="panel-title"><h2>My tasks</h2></div>
     <div className="task-list">{rows.map(t=><div className="task-row" key={t.id}><div className="task-icon layout"><CheckSquare size={16}/></div>
       <div className="task-info"><strong>{t.title}</strong><span>{t.department} • Assigned {fmtDay(t.assigned_date)}</span></div>
-      <button className="small-btn" onClick={()=>done(t.id)}>{t.department==='Colorist'?'Colorgraded':'Done'}</button></div>)}</div>
+      <ActionButton label={t.department==='Colorist'?'Colorgraded':'Done'} run={()=>done(t.id)} after={load}/></div>)}</div>
   </div>
 }
 
@@ -513,19 +522,19 @@ function PostingTracker({profile}){
     setLoading(false)
   }
   useEffect(()=>{ load() },[]); usePoll(load)
-  async function markPosted(id){ const {error}=await supabase.rpc('mark_event_posted',{sid:id}); if(error) notifyDialog(error.message); load() }
+  const markPosted=id=>supabase.rpc('mark_event_posted',{sid:id})
   const cls=v=>v==='completed'?'completed':v==='in progress'?'in_progress':'scheduled'
   return <div className="panel table-panel" style={{marginTop:14}}>
     <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2></div>
-    <div style={{overflowX:'auto'}}>
+    <div>
       <div className="table-head posting-row"><span>Event Date</span><span>Event Name</span><span>Post By</span><span>Sorted</span><span>Colorgrade</span><span>FB Cover</span><span>Posted</span><span>Posted On</span></div>
       {loading ? <div className="empty">Loading…</div> : rows.map(r=><div className="table-row posting-row" key={r.id}>
-        <span>{fmtDay(r.date)}</span><strong>{r.title}</strong><span>{fmtDay(r.supposedPost)}</span>
-        <span className={`status ${r.isSorted?'completed':r.partial?'in_progress':'scheduled'}`}>{r.sorted}</span>
-        <span className={`status ${cls(r.colorgrade)}`}>{r.colorgrade}</span>
-        <span className={`status ${cls(r.cover)}`}>{r.cover}</span>
-        <span>{r.posted ? <span className="status completed">posted</span> : (canPost && (r.cover==='completed'||isAdminLike(profile.role)) ? <button className="small-btn" onClick={()=>markPosted(r.id)}>Mark posted</button> : <span className="status scheduled">not posted</span>)}</span>
-        <span>{r.postedOn?fmtDay(r.postedOn):'—'}</span>
+        <span data-label="Event date">{fmtDay(r.date)}</span><strong className="row-title">{r.title}</strong><span data-label="Post by">{fmtDay(r.supposedPost)}</span>
+        <span data-label="Sorted"><span className={`status ${r.isSorted?'completed':r.partial?'in_progress':'scheduled'}`}>{r.sorted}</span></span>
+        <span data-label="Colorgrade"><span className={`status ${cls(r.colorgrade)}`}>{r.colorgrade}</span></span>
+        <span data-label="FB cover"><span className={`status ${cls(r.cover)}`}>{r.cover}</span></span>
+        <span data-label="Posted">{r.posted ? <span className="status completed">posted</span> : (canPost && (r.cover==='completed'||isAdminLike(profile.role)) ? <ActionButton label="Mark posted" doneLabel="Posted" run={()=>markPosted(r.id)} after={load}/> : <span className="status scheduled">not posted</span>)}</span>
+        <span data-label="Posted on">{r.postedOn?fmtDay(r.postedOn):'—'}</span>
       </div>)}
       {!loading && !rows.length && <div className="empty">No media events yet.</div>}
     </div>
@@ -555,7 +564,7 @@ function HoursDashboard({profile}){
     setToSort(rows.filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && !my.sorted && new Date(s.start_at)<=now }))
   }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
-  async function markSorted(scheduleId){ const {error}=await supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id); if(error) notifyDialog(error.message); load() }
+  const markSorted=scheduleId=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id)
   const next=items[0]
   return <div>
     <WelcomeHero profile={profile}/>
@@ -576,7 +585,7 @@ function HoursDashboard({profile}){
       <div className="panel-title"><h2>To sort</h2></div>
       <div className="task-list">{toSort.map(s=><div className="task-row" key={s.id}><div className="task-icon media"><CalendarDays size={16}/></div>
         <div className="task-info"><strong>{s.title}</strong><span>{fmtDay(s.start_at)}{sortProgress(s)}</span></div>
-        <button className="small-btn" onClick={()=>markSorted(s.id)}>Sorted</button></div>)}</div>
+        <ActionButton label="Sorted" run={()=>markSorted(s.id)} after={load}/></div>)}</div>
     </div>}
     {next && <div className="panel task-panel" style={{marginBottom:14}}>
       <div className="panel-title"><h2>Next up</h2></div>
@@ -619,12 +628,12 @@ function TasksDashboard({profile}){
       const {data:ownTasks}=await supabase.from('tasks').select('schedule_id').eq('department','Colorist').not('schedule_id','is',null)
       const assignedIds=new Set((ownTasks||[]).map(t=>t.schedule_id))
       setAvail((done||[]).filter(e=>!assignedIds.has(e.id)))
-      const {data:tm}=await supabase.from('profiles').select('id,full_name,role').in('role',['staff_colorist','eic']).eq('active',true).order('full_name')
+      const {data:tm}=await supabase.from('profiles').select('id,full_name,role').in('role',['staff_colorist','eic','art_director','head_media']).eq('active',true).order('full_name')
       setTeammates(tm||[])
     }
   }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
-  async function markDone(id){ const {error}=await supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id); if(error) notifyDialog(error.message); load() }
+  const markDone=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
   function setPickList(scheduleId,ids){ setPicks(p=>({...p,[scheduleId]:new Set(ids)})) }
   async function assignStage(scheduleId,eventTitle,ids){
     if(!ids.length) return
@@ -647,8 +656,9 @@ function TasksDashboard({profile}){
         <div style={{marginBottom:10}}><strong style={{display:'block',fontSize:13}}>{e.title}</strong><span style={{fontSize:11,color:'var(--text-dim)'}}>{fmtDay(e.start_at)}{e.sorted_at?` • sorted ${fmtDay(e.sorted_at,false)}`:''}</span></div>
         <div className="assign-row">
           <button className="small-btn" onClick={()=>assignStage(e.id,e.title,[profile.id])}>Assign to myself</button>
-          <div className="token-row" style={{flex:1}}>{teammates.map(m=><button type="button" key={m.id} className={`token ${picked.includes(m.id)?'active':''}`} onClick={()=>setPickList(e.id, picked.includes(m.id)?picked.filter(x=>x!==m.id):[...picked,m.id])}>{m.full_name}{m.role==='eic'?' · EDBO':''}</button>)}
-            {!teammates.length && <span style={{fontSize:11,color:'var(--text-dim)'}}>No colorists yet.</span>}</div>
+          <div style={{flex:1,display:'grid',gap:8}}>
+            {[['EDBO',teammates.filter(m=>isBoard(m.role))],['STAFF',teammates.filter(m=>m.role==='staff_colorist')]].map(([lab,list])=>list.length>0 && <div key={lab}><div className="token-group-label">{lab}</div><div className="token-row">{list.map(m=><button type="button" key={m.id} className={`token ${picked.includes(m.id)?'active':''}`} onClick={()=>setPickList(e.id, picked.includes(m.id)?picked.filter(x=>x!==m.id):[...picked,m.id])}>{m.full_name}</button>)}</div></div>)}
+            {!teammates.length && <span style={{fontSize:11,color:'var(--text-dim)'}}>No one else to assign yet.</span>}</div>
           {picked.length>0 && <button className="small-btn" onClick={()=>assignStage(e.id,e.title,picked)}>Assign selected ({picked.length})</button>}
         </div>
       </div> })}
@@ -657,7 +667,7 @@ function TasksDashboard({profile}){
       <div className="panel-title"><h2>{worker?'My tasks':'Recent tasks'}</h2></div>
       <div className="task-list">{list.map(t=>{ const mine=t.status!=='completed' && t.assigned_to===profile.id; return <div className="task-row" key={t.id}><div className="task-icon layout"><CheckSquare size={16}/></div>
         <div className="task-info"><strong>{t.title}</strong><span>{worker?'':`${t.profiles?.full_name||'Unassigned'} • `}Assigned {fmtDay(t.assigned_date,false)}{t.status==='completed'&&t.completed_at?` • Done ${fmtDay(t.completed_at,false)}`:''}</span></div>
-        {mine ? <button className="small-btn" onClick={()=>markDone(t.id)}>{t.department==='Colorist'?'Colorgraded':'Done'}</button> : <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>}</div> })}
+        {mine ? <ActionButton label={t.department==='Colorist'?'Colorgraded':'Done'} run={()=>markDone(t.id)} after={load}/> : <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>}</div> })}
         {list.length===0 && <div className="empty">Nothing here yet.</div>}</div>
     </div>
     {hasPostingTracker(role) && <PostingTracker profile={profile}/>}
@@ -693,24 +703,24 @@ function TaskTracker({profile}){
     </div>}
     {privileged && <>
       <div className="eyebrow" style={{margin:'6px 0 8px'}}>EVENTS — MEDIA</div>
-      <div className="panel table-panel" style={{marginBottom:20,overflowX:'auto'}}>
+      <div className="panel table-panel" style={{marginBottom:20}}>
         <div className="table-head trk-events"><span>Event</span><span>Event date</span><span>Photographers</span><span>Sorted on</span><span>Status</span><span>Action</span></div>
         {loading ? <div className="empty">Loading…</div> : filteredEvents.map(e=><div className="table-row trk-events" key={e.id}>
-          <strong>{e.title}</strong><span>{fmtDay(e.start_at)}</span>
-          <span>{(e.schedule_members||[]).map(m=>m.profiles?.full_name).filter(Boolean).join(', ')||'—'}</span>
-          <span>{e.sorted_at?fmtDay(e.sorted_at):'—'}</span>
-          <span className={`status ${e.status}`}>{e.status==='completed'?'sorted':e.status}</span>
-          <span style={{display:'flex',gap:4}}><button className="icon-btn" title="Edit" onClick={()=>setEditEvent(e)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>delEvent(e.id)}><Trash2 size={14}/></button></span>
+          <strong className="row-title">{e.title}</strong><span data-label="Event date">{fmtDay(e.start_at)}</span>
+          <span data-label="Photographers">{(e.schedule_members||[]).map(m=>m.profiles?.full_name).filter(Boolean).join(', ')||'—'}</span>
+          <span data-label="Sorted on">{e.sorted_at?fmtDay(e.sorted_at):'—'}</span>
+          <span data-label="Status"><span className={`status ${e.status}`}>{e.status==='completed'?'sorted':e.status}</span></span>
+          <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEditEvent(e)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>delEvent(e.id)}><Trash2 size={14}/></button></span>
         </div>)}
         {!loading && !filteredEvents.length && <div className="empty">No sorted events yet.</div>}
       </div>
     </>}
     <div className="eyebrow" style={{margin:'6px 0 8px'}}>TASKS — {privileged?'ALL DEPARTMENTS':profile.department.toUpperCase()}</div>
-    <div className="panel table-panel" style={{overflowX:'auto'}}>
+    <div className="panel table-panel">
       <div className={`table-head trk-tasks ${can?'':'no-action'}`}><span>Task</span><span>Department</span><span>Assignee</span><span>Assigned</span><span>Done</span>{can && <span>Action</span>}</div>
       {loading ? <div className="empty">Loading…</div> : filteredTasks.map(t=><div className={`table-row trk-tasks ${can?'':'no-action'}`} key={t.id}>
-        <strong>{t.title}</strong><span>{t.department}</span><span>{t.profiles?.full_name||'Unassigned'}</span><span>{fmtDay(t.assigned_date)}</span><span>{t.completed_at?fmtDay(t.completed_at):'—'}</span>
-        {can && <span style={{display:'flex',gap:4}}><button className="icon-btn" title="Edit" onClick={()=>setEditTask(t)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(t.id)}><Trash2 size={14}/></button></span>}
+        <strong className="row-title">{t.title}</strong><span data-label="Department">{t.department}</span><span data-label="Assignee">{t.profiles?.full_name||'Unassigned'}</span><span data-label="Assigned">{fmtDay(t.assigned_date)}</span><span data-label="Done">{t.completed_at?fmtDay(t.completed_at):'—'}</span>
+        {can && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEditTask(t)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(t.id)}><Trash2 size={14}/></button></span>}
       </div>)}
       {!loading && !filteredTasks.length && <div className="empty">Nothing completed yet.</div>}
     </div>
@@ -721,10 +731,9 @@ function TaskTracker({profile}){
 function localISO(v){ const d=new Date(v); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 
 // Who can be given a task, per department. EDBO sometimes colorgrades / does cover work too.
-const ASSIGNEE_ROLES=['staff_colorist','head_colorist','art_director','eic']
-function taskAssigneeGroups(members,dept){
-  if(dept==='Art Director') return [{label:'ART DIRECTOR',people:members.filter(m=>m.role==='art_director')},{label:'EDBO',people:members.filter(m=>m.role==='eic')}]
-  return [{label:'COLORIST',people:members.filter(m=>m.role==='staff_colorist')},{label:'TD',people:members.filter(m=>m.role==='head_colorist')},{label:'EDBO',people:members.filter(m=>m.role==='eic')}]
+const ASSIGNEE_ROLES=['staff_colorist','head_colorist','art_director','eic','head_media']
+function taskAssigneeGroups(members){
+  return [{label:'EDBO',people:members.filter(m=>isBoard(m.role))},{label:'STAFF',people:members.filter(m=>m.role==='staff_colorist')}]
 }
 function useAssignees(){
   const [members,setMembers]=useState([])
@@ -745,7 +754,7 @@ function TaskModal({profile,onClose,onSaved}){
     <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
     <label>For<select value={form.department} onChange={e=>setForm({...form,department:e.target.value,assignedIds:[]})}>{depts.map(d=><option key={d}>{d}</option>)}</select></label>
     <label>Assign to</label>
-    <PersonPicker groups={taskAssigneeGroups(members,form.department)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
+    <PersonPicker groups={taskAssigneeGroups(members)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
     <label>Assigned date<DateField required value={form.assigned_date} onChange={v=>setForm({...form,assigned_date:v})}/></label>
     <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Create task'}</button></div>
   </form></Modal>
@@ -762,7 +771,7 @@ function EditTaskModal({task,onClose,onSaved}){
     <label>Title<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
     <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
     <label>Assign to</label>
-    <PersonPicker groups={taskAssigneeGroups(members,task.department)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
+    <PersonPicker groups={taskAssigneeGroups(members)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
     <label>Assigned date<DateField required value={form.assigned_date} onChange={v=>setForm({...form,assigned_date:v})}/></label>
     <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Save changes'}</button></div>
   </form></Modal>
@@ -771,7 +780,7 @@ function EditTaskModal({task,onClose,onSaved}){
 /* ---------------- Calendar (mode-aware, works for everyone) ---------------- */
 function CalendarPage({profile}){
   const role=profile.role; const staff=isStaff(role); const worker=isWorker(role)
-  const effMode = isAdminLike(role) ? 'all' : roleMode(role)
+  const effMode = (isAdminLike(role)||isTD(role)||role==='art_director') ? 'all' : roleMode(role)
   const [month,setMonth]=useState(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d })
   const [items,setItems]=useState([]) // unified {id,title,date,type,raw}
   const [selected,setSelected]=useState(null)
@@ -796,6 +805,7 @@ function CalendarPage({profile}){
     if(effMode==='tasks' || effMode==='all'){
       let tq=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name)').not('assigned_date','is',null).gte('assigned_date',localISO(rangeStart)).lt('assigned_date',localISO(rangeEnd))
       if(effMode==='tasks'){ if(worker) tq=tq.eq('assigned_to',profile.id); else tq=tq.in('department',managedTaskDepts(role)) }
+      else if(!isAdminLike(role)) tq=tq.or(`assigned_to.eq.${profile.id}${isTD(role)?',department.in.(Colorist,"Art Director")':''}`)
       const {data}=await tq; let rows=data||[]
       unified=unified.concat(rows.map(t=>({id:'t-'+t.id,title:t.title,date:new Date(t.assigned_date+'T00:00:00'),type:'task',raw:t})))
     }
@@ -809,7 +819,7 @@ function CalendarPage({profile}){
   const monthLabel=month.toLocaleDateString([], {month:'long',year:'numeric'}); const today=new Date()
   const upcoming=items.filter(e=>{ const st=e.raw.status; return e.date>=new Date(today.getFullYear(),today.getMonth(),today.getDate()) && st!=='completed' && st!=='done' }).sort((a,b)=>a.date-b.date).slice(0,8)
 
-  async function markMySorted(scheduleId){ const {error}=await supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id); if(error) notifyDialog(error.message); load() }
+  const markMySorted=scheduleId=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id)
   // Admin / EDBO only: sort the whole event on everyone's behalf.
   async function markAllSorted(sched){
     if(!await confirmDialog({title:'Mark whole event sorted?',body:'This marks every assigned photographer as sorted.',confirmLabel:'Mark sorted'})) return
@@ -817,7 +827,7 @@ function CalendarPage({profile}){
     const r= n ? await supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',sched.id) : await supabase.from('schedules').update({status:'completed'}).eq('id',sched.id)
     if(r.error) notifyDialog(r.error.message); load()
   }
-  async function markTaskDone(id){ await supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id); load() }
+  const markTaskDone=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
   async function deleteItem(item){ if(!await confirmDialog({title:'Delete this?',body:'This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; if(item.type==='task') await supabase.from('tasks').delete().eq('id',item.raw.id); else await supabase.from('schedules').delete().eq('id',item.raw.id); setSelected(null); load() }
   const canEdit=item=> item.type==='task' ? canCreateTask(role) : canCreateSchedule(role)
 
@@ -854,9 +864,9 @@ function CalendarPage({profile}){
           <span>Assigned {fmtDay(e.raw.assigned_date)}{e.raw.completed_at?` • Done ${fmtDay(e.raw.completed_at)}`:''}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status.replace('_',' ')}</span></>}
         {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id}>{m.profiles?.full_name}{m.sorted?' ✓ sorted':' • pending'}</span>)}</div>}
         <div style={{marginTop:8,display:'flex',gap:8,flexWrap:'wrap'}}>
-          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted) && <button className="small-btn" onClick={()=>markMySorted(e.raw.id)}>I've sorted my part</button>}
+          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted) && <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>}
           {e.type==='schedule' && e.raw.status!=='completed' && isAdminLike(role) && <button className="ghost-btn" onClick={()=>markAllSorted(e.raw)}>Mark all sorted</button>}
-          {e.type==='task' && e.raw.status!=='completed' && (e.raw.assigned_to===profile.id || isAdminLike(role)) && <button className="small-btn" onClick={()=>markTaskDone(e.raw.id)}>{e.raw.department==='Colorist'?'Colorgraded':'Mark done'}</button>}
+          {e.type==='task' && e.raw.status!=='completed' && (e.raw.assigned_to===profile.id || isAdminLike(role)) && <ActionButton label={e.raw.department==='Colorist'?'Colorgraded':'Mark done'} doneLabel={e.raw.department==='Colorist'?'Colorgraded':'Done'} run={()=>markTaskDone(e.raw.id)} after={load}/>}
           {canEdit(e) && <button className="ghost-btn" onClick={()=>setEditItem(e)}><Pencil size={13}/> Edit</button>}
           {canEdit(e) && <button className="danger-btn" onClick={()=>deleteItem(e)}><Trash2 size={13}/> Delete</button>}
         </div>
@@ -961,13 +971,13 @@ function Tracker({profile}){
   async function del(id){ if(!await confirmDialog({title:'Delete event?',body:'This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('schedules').delete().eq('id',id); load() }
   return <div>
     <section className="page-head"><div><div className="eyebrow">FULL LEDGER</div><h1>Tracker</h1><p>Sorted events in {profile.department}, with hours and sorted dates.</p></div></section>
-    <div className="panel table-panel" style={{overflowX:'auto'}}>
+    <div className="panel table-panel">
       <div className={`table-head trk-media ${can?'':'no-action'}`}><span>Event</span><span>Event date • Time</span><span>Members</span><span>Hours</span><span>Sorted on</span>{can && <span>Action</span>}</div>
-      {rows.map(r=><div className={`table-row trk-media ${can?'':'no-action'}`} key={r.id}><strong>{r.title}</strong><span>{fmtDay(r.start_at)} • {fmtTime(r.start_at)}–{fmtTime(r.end_at)}</span>
-        <span>{(r.schedule_members||[]).map(m=>m.profiles?.full_name).join(', ')||'—'}</span>
-        <span>{Math.max(0,(new Date(r.end_at)-new Date(r.start_at))/3600000).toFixed(1)}h</span>
-        <span>{r.sorted_at?fmtDay(r.sorted_at):'—'}</span>
-        {can && <span style={{display:'flex',gap:4}}><button className="icon-btn" title="Edit" onClick={()=>setEdit(r)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(r.id)}><Trash2 size={14}/></button></span>}</div>)}
+      {rows.map(r=><div className={`table-row trk-media ${can?'':'no-action'}`} key={r.id}><strong className="row-title">{r.title}</strong><span data-label="Event date • time">{fmtDay(r.start_at)} • {fmtTime(r.start_at)}–{fmtTime(r.end_at)}</span>
+        <span data-label="Members">{(r.schedule_members||[]).map(m=>m.profiles?.full_name).join(', ')||'—'}</span>
+        <span data-label="Hours">{Math.max(0,(new Date(r.end_at)-new Date(r.start_at))/3600000).toFixed(1)}h</span>
+        <span data-label="Sorted on">{r.sorted_at?fmtDay(r.sorted_at):'—'}</span>
+        {can && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEdit(r)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(r.id)}><Trash2 size={14}/></button></span>}</div>)}
       {!rows.length && <div className="empty">Nothing sorted yet.</div>}
     </div>
     {edit && <EditScheduleModal schedule={edit} onClose={()=>setEdit(null)} onSaved={load}/>}
@@ -1043,7 +1053,7 @@ function Members({profile,deptFocus,onClearFocus}){
       </div></section>
     <div className="members-grid">{rows.map(m=><div className="panel member-card" key={m.id} onClick={()=>setDetail(m)}>
       <div className="member-top"><div className="avatar large">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>{m.active && <span className="active-dot">● active</span>}</div>
-      <h3>{m.full_name}</h3><p>{ROLE_META[m.role]?.label || m.role}</p>
+      <h3>{m.full_name}</h3><p>{m.role==='eic'&&m.position?`EDBO · ${m.position}`:(ROLE_META[m.role]?.label || m.role)}</p>
       <div className="member-meta"><span>{m.department}</span><span>{m.position||'—'}</span></div>
     </div>)}
       {!rows.length && <div className="panel empty">No members yet.</div>}</div>
@@ -1087,7 +1097,7 @@ function MemberDetailModal({member,onClose}){
   </Modal>
 }
 
-const ROLE_OPTIONS=[['admin','Admin'],['eic','EDBO'],['art_director','Art Director'],['head_media','Head Media'],['staff_media','Media'],['head_colorist','TD (Head Colorist)'],['staff_colorist','Colorist']]
+const ROLE_OPTIONS=[['admin','Admin'],['eic','EDBO (EIC / AEIC / Finance / Heads)'],['art_director','Art Director'],['head_media','Head Media'],['staff_media','Media'],['head_colorist','TD (Head Colorist)'],['staff_colorist','Colorist']]
 function deptForRole(r){ return ROLE_META[r]?.dept || 'Admin' }
 function CreateAccountModal({profile,defaultDept,onClose,onSaved}){
   const [form,setForm]=useState({full_name:'',email:'',password:'',position:'',role:'staff_media',avatar_url:''})
@@ -1108,7 +1118,7 @@ function CreateAccountModal({profile,defaultDept,onClose,onSaved}){
     </div>
     <div className="form-row">
       <label>Role<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{ROLE_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
-      <label>Position title<input value={form.position} onChange={e=>setForm({...form,position:e.target.value})} placeholder="e.g. Photographer"/></label>
+      <label>Position title<input list="position-list" value={form.position} onChange={e=>setForm({...form,position:e.target.value})} placeholder="e.g. EIC, AEIC, Finance, Photographer"/><datalist id="position-list"><option value="EIC"/><option value="AEIC"/><option value="Finance"/><option value="Head Writer"/><option value="Head Researcher"/><option value="Photographer"/></datalist></label>
     </div>
     {err && <div className="error">{err}</div>}
     <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Creating…':'Create account'}</button></div>
@@ -1220,7 +1230,7 @@ function EditMemberModal({member,onClose,onSaved}){
     <label>Profile picture URL<input type="url" placeholder="https://…" value={form.avatar_url} onChange={e=>setForm({...form,avatar_url:e.target.value})}/></label>
     <div className="form-row">
       <label>Role<select value={form.role} onChange={e=>setForm({...form,role:e.target.value})}>{ROLE_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
-      <label>Position title<input value={form.position} onChange={e=>setForm({...form,position:e.target.value})}/></label>
+      <label>Position title<input list="position-list" value={form.position} onChange={e=>setForm({...form,position:e.target.value})}/><datalist id="position-list"><option value="EIC"/><option value="AEIC"/><option value="Finance"/><option value="Head Writer"/><option value="Head Researcher"/><option value="Photographer"/></datalist></label>
     </div>
     <label style={{display:'flex',flexDirection:'row',alignItems:'center',gap:8}}><input type="checkbox" style={{width:'auto'}} checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Active member</label>
     {err && <div className="error">{err}</div>}
@@ -1247,7 +1257,7 @@ function Backup({profile}){
   const [deptFilter,setDeptFilter]=useState('')
   const dept=privileged?(deptFilter||null):profile.department
   const [sheetUrl,setSheetUrl]=useState(''); const [urlDraft,setUrlDraft]=useState(''); const [saved,setSaved]=useState(false)
-  const [people,setPeople]=useState([]); const [detail,setDetail]=useState([]); const [loading,setLoading]=useState(true)
+  const [people,setPeople]=useState([]); const [detail,setDetail]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
   const scope=dept||'ALL'
   useEffect(()=>{ load() },[profile.id,deptFilter])
   async function load(){
@@ -1279,28 +1289,31 @@ function Backup({profile}){
   }
   async function saveLink(){ const {error}=await supabase.from('integrations').upsert({scope,sheet_webhook_url:urlDraft,updated_by:profile.id,updated_at:new Date().toISOString()},{onConflict:'scope'}); if(error) notifyDialog(error.message); else { setSheetUrl(urlDraft); setSaved(true); setTimeout(()=>setSaved(false),2000) } }
   return <div>
-    <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{isAdminLike(profile.role)?'Main spreadsheet backup':`${dept||'Team'} backup`}</h1><p>All-summary CSV, or a per-person detail CSV with every task or event assigned.</p></div>
+    <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{isAdminLike(profile.role)?'Main spreadsheet backup':`${dept||'Team'} backup`}</h1><p>Everyone listed by name — tap a name to see all of their events or tasks.</p></div>
       {privileged && <select value={deptFilter} onChange={e=>setDeptFilter(e.target.value)} className="filter-select"><option value="">All departments</option>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</select>}
     </section>
     <div className="panel task-panel" style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:14,flexWrap:'wrap'}}>
-      <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>Kept up to date automatically by the Apps Script from the README — this page doesn't push data to it.</p></div>
+      <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>The sheet pulls live data by itself (see the README, section 5) — this page only keeps the link.</p></div>
       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
         {canSetLink && <input className="filter-select" style={{width:220}} placeholder="Paste the sheet's share URL" value={urlDraft} onChange={e=>setUrlDraft(e.target.value)}/>}
         {canSetLink && <button className="secondary-btn" onClick={saveLink}>{saved?'Saved ✓':'Save link'}</button>}
         {sheetUrl && <a className="primary-btn" href={sheetUrl} target="_blank" rel="noreferrer"><ExternalLink size={15}/> Check Google Sheet</a>}
       </div>
     </div>
-    <div className="panel table-panel" style={{marginBottom:14}}>
-      <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>All summary</h2><div style={{display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{people.length} people</span><button className="text-btn" onClick={()=>downloadCSV('backup-summary.csv',people)}><Download size={13}/> Download CSV</button></div></div>
-      <div className="table-head"><span>Name</span><span>Position</span><span>Department</span><span>Metric</span><span>Total</span></div>
-      {loading ? <div className="empty">Loading…</div> : people.map((p,i)=><div className="table-row" key={i}><strong>{p.Name}</strong><span>{p.Position}</span><span>{p.Department}</span><span>{p.Metric}</span><span>{p.Total}</span></div>)}
-      {!loading && !people.length && <div className="empty">No members yet.</div>}
-    </div>
     <div className="panel table-panel">
-      <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>By person — detail</h2><div style={{display:'flex',alignItems:'center',gap:10}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{detail.length} records</span><button className="text-btn" onClick={()=>downloadCSV('backup-detail.csv',detail)}><Download size={13}/> Download CSV</button></div></div>
-      <div className="table-head"><span>Date</span><span>Event / Task</span><span>Name</span><span>From → To</span><span>Hours / Status</span></div>
-      {loading ? <div className="empty">Loading…</div> : detail.map((d,i)=><div className="table-row" key={i}><strong>{d.Date}</strong><span>{d.Event}</span><span>{d.Name}</span><span>{d.From}</span><span>{d.Hours}</span></div>)}
-      {!loading && !detail.length && <div className="empty">Nothing logged yet.</div>}
+      <div className="panel-title" style={{padding:'21px 21px 12px'}}><h2>People</h2><div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{people.length} people • tap a name to open</span><button className="text-btn" onClick={()=>downloadCSV('backup-summary.csv',people)}><Download size={13}/> Summary CSV</button><button className="text-btn" onClick={()=>downloadCSV('backup-detail.csv',detail)}><Download size={13}/> Detail CSV</button></div></div>
+      {loading ? <div className="empty">Loading…</div> : people.map(p=>{ const rows=detail.filter(d=>d.Name===p.Name); const open=openId===p.Name
+        return <div key={p.Name} className={`person-acc ${open?'open':''}`}>
+          <button type="button" className="person-head" onClick={()=>setOpenId(open?null:p.Name)}>
+            <ChevronRight size={16} className="person-chev"/><strong>{p.Name}</strong>
+            <span className="person-meta">{p.Position} • {p.Department}</span>
+            <span className="person-total">{p.Total} <small>{p.Metric==='Total Hours'?'hrs':'done'}</small></span>
+          </button>
+          {open && <div className="person-body">
+            {rows.length?<div className="person-rows">{rows.map((d,i)=><div className="person-row" key={i}><b>{d.Date}</b><span>{d.Event}</span><span>{d.From}</span><span>{d.Hours}</span></div>)}</div>:<div className="empty" style={{padding:'14px 0'}}>Nothing logged yet.</div>}
+          </div>}
+        </div> })}
+      {!loading && !people.length && <div className="empty">No members yet.</div>}
     </div>
   </div>
 }
