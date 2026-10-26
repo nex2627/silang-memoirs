@@ -394,3 +394,28 @@ select[multiple]{min-height:110px}
   .settings-row{flex-direction:column;align-items:stretch;justify-content:flex-start;text-align:left;gap:12px}
   .settings-actions{justify-content:flex-start;flex-wrap:wrap}
 }
+
+/* Dropdowns drawn in the app's own style */
+.sel{position:relative;display:block;min-width:0}
+.sel-btn{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:8px;padding:10px 11px;font-size:12px;transition:border-color .15s,box-shadow .15s}
+.sel-btn:hover{border-color:var(--sand)}
+.sel.open .sel-btn,.sel-btn:focus-visible{border-color:var(--sand);box-shadow:0 0 0 3px rgba(208,169,126,.16);outline:none}
+.sel-btn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sel-chev{flex-shrink:0;color:var(--text-dim);transition:transform .2s}
+.sel.open .sel-chev{transform:rotate(180deg);color:var(--sand)}
+.sel-btn:disabled{opacity:.55;cursor:not-allowed}
+.filter-bar .sel{min-width:150px}
+.filter-bar .sel-btn{padding:9px 11px}
+.sel-list{position:fixed;z-index:400;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);padding:5px;animation:fade .12s ease;min-width:140px}
+.sel-list button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;border:0;background:transparent;color:var(--text);text-align:left;padding:9px 10px;border-radius:7px;font-size:12px;transition:background .12s}
+.sel-list button:hover{background:var(--surface-2)}
+.sel-list button.on{background:rgba(208,169,126,.22);font-weight:700}
+.sel-list button svg{color:var(--sand);flex-shrink:0}
+/* The Clear button keeps its place, so nothing moves when a filter is used */
+.filter-clear{align-self:flex-end;padding:11px 6px;min-width:44px}
+.filter-clear.off{visibility:hidden}
+/* Members grouped by section */
+.members-section{margin-bottom:22px}
+.members-section-head{display:flex;align-items:center;gap:10px;margin:6px 2px 12px}
+.members-section-head h2{margin:0;font-family:"Playfair Display";font-size:20px;color:var(--text)}
+.members-section-head span{font-size:11px;font-weight:700;background:var(--surface-2);color:var(--text-dim);border-radius:999px;padding:3px 9px}

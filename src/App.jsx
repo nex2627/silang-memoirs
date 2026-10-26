@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Children, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './lib/supabase'
 import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
-  ChevronLeft, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
+  ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
   Download, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 } from 'lucide-react'
 
@@ -22,17 +22,32 @@ const ROLE_META = {
 const DEPARTMENTS = ['Media','Colorist','Art Director']
 const DEPT_ICON = { Media:Camera, Colorist:Wand2, 'Art Director':LayoutDashboard }
 // EDBO positions you can pick when creating / editing an account -> the database role behind them.
-const EDBO_POSITIONS = [['EIC','eic'],['AEIC','aeic'],['TD','head_colorist'],['Art Director','art_director'],['Head Media','head_media'],['Finance','edbo'],['Head Layout','edbo'],['Head Writer','edbo'],['Head Researcher','edbo']]
+const EDBO_POSITIONS = [['EIC','eic'],['AEIC','aeic'],['TD','head_colorist'],['Finance','edbo'],['Art Director','art_director'],['Head Media','head_media'],['Head Layout','edbo'],['Head Researcher','edbo'],['Head Writer','edbo']]
 const ACCOUNT_GROUPS = ['Admin','EDBO','Media','Colorist']
+// What is stored in the database: only 4 roles. EDBO members are told apart by their Position.
+const DB_ROLE = { Admin:'admin', EDBO:'edbo', Media:'media', Colorist:'colorist' }
+const POS_ROLE = { 'eic':'eic', 'aeic':'aeic', 'td':'head_colorist', 'art director':'art_director', 'head media':'head_media' }
+const EDBO_ORDER = ['EIC','AEIC','TD','Finance','Art Director','Head Media','Head Layout','Head Researcher','Head Writer']
+const SECTION_ORDER = ['Admin','EDBO','Media','Colorist']
 const DUTIES = [['PM','Photo Main'],['PC','Photo Creative'],['VM','Video Main'],['VC','Video Creative']]
 const LOGO = `${import.meta.env.BASE_URL}logo.png`
 const EDITION = 'Nexemeral 27'
 const WELCOME_LINE = 'Keep every story, page, photograph and fact moving toward the finished yearbook.'
 const IDLE_LIMIT_MS = 3*60*1000
 // Pipeline: Media event sorted -> TD assigns colorgrading (self / Colorist / EDBO) -> all colorgraded -> Art Director makes the Facebook cover -> posted.
-const TD_STAGE = { dept:'Colorist', verb:'colorgrading', titlePrefix:'Colorgrade' }
+const TD_STAGE = { dept:'Colorist', verb:'colorgrading', titlePrefix:'Colorgrading' }
 
 /* ---------------- Helpers ---------------- */
+// Database (role + position) -> the working role the screens use.
+function effRole(role,position){ if(role==='edbo') return POS_ROLE[String(position||'').trim().toLowerCase()]||'edbo'; if(role==='media') return 'staff_media'; if(role==='colorist') return 'staff_colorist'; return role }
+function normP(p){ if(!p) return p; const role=effRole(p.role,p.position); return {...p, dbRole:p.role, role, department:ROLE_META[role]?.dept||p.department} }
+async function fetchProfiles(){ const {data,error}=await supabase.from('profiles').select('*').order('full_name'); if(error) console.error(error); return (data||[]).map(normP) }
+async function fetchActive(){ return (await fetchProfiles()).filter(p=>p.active!==false) }
+// Directory order: Admin, then EDBO (EIC, AEIC, TD, Finance, Art Director, Head Media, Head Layout, Head Researcher, Head Writer), then Media, then Colorist.
+function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p.position||'').trim().toLowerCase()); if(i>=0) return i; const f={eic:0,aeic:1,head_colorist:2,art_director:4,head_media:5}[p.role]; return f??50 }
+function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
+// Video-only crew (VM / VC) do not have to sort photos.
+function needsSort(m){ const d=m.duties||[]; return !(d.length && d.every(x=>x==='VM'||x==='VC')) }
 function isHead(role){ return !!ROLE_META[role]?.head }
 function isStaff(role){ return !!role && role.startsWith('staff_') }
 function isAdminLike(role){ return ['admin','eic','aeic'].includes(role) }   // can add / edit everything
@@ -40,23 +55,22 @@ function isViewer(role){ return role==='edbo' }                                 
 function seesAll(role){ return isAdminLike(role) || isViewer(role) }
 function isWorker(role){ return isStaff(role) || role==='art_director' }       // sees only their own assigned work
 function isTD(role){ return role==='head_colorist' }
-function isBoard(role){ return ['eic','aeic','edbo','art_director','head_colorist','head_media'].includes(role) }
-const BOARD_ASSIGNABLE=['eic','aeic','art_director','head_colorist']             // EDBO who can be put on events / colorgrade
+const BOARD_ASSIGNABLE=['eic','aeic','art_director','head_colorist']             // EDBO who can be given colorgrading
+const EVENT_BOARD=[...BOARD_ASSIGNABLE,'head_media']                              // EDBO who can be put on events
 function roleDept(role){ return ROLE_META[role]?.dept || null }
 function roleMode(role){ return ROLE_META[role]?.mode || 'admin' }
-function groupOf(role){ return role==='staff_media'?'Media':role==='staff_colorist'?'Colorist':'EDBO' }
+function groupOf(role){ return role==='admin'?'Admin':role==='staff_media'?'Media':role==='staff_colorist'?'Colorist':'EDBO' }
 function roleLabel(p){ if(!p) return ''; if(p.role==='edbo') return p.position||'EDBO'; return ROLE_META[p.role]?.label || p.role }
 function canCreateTask(role){ return isAdminLike(role) || isTD(role) }
 function canCreateSchedule(role){ return isAdminLike(role) || role==='head_media' }
 function canManageAccounts(role){ return role==='admin' }
 function managedTaskDepts(role){ if(seesAll(role)) return ['Colorist','Art Director']; if(isTD(role)) return ['Colorist']; return [] }
-function hasPostingTracker(role){ return isAdminLike(role) || isTD(role) || role==='art_director' }
+function hasPostingTracker(role){ return isAdminLike(role) || isTD(role) || role==='art_director' || role==='head_media' }
 function crewText(m){ return `${m.profiles?.full_name||''}${(m.duties||[]).length?` · ${m.duties.join('/')}`:''}` }
 function initials(name=''){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase() }
 function greet(){ const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening' }
 function sameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate() }
 function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
-function roleRank(role){ if(role==='admin') return 0; if(['eic','aeic'].includes(role)) return 1; if(role==='edbo') return 2; if(role==='art_director') return 3; if(isHead(role)) return 4; return 5 }
 function fmtDay(d,withYear=true){ if(!d) return '—'; const x=d instanceof Date?d:new Date(d.length===10?d+'T00:00:00':d); if(isNaN(x)) return '—'; return x.toLocaleDateString([], withYear?{weekday:'short',month:'short',day:'numeric',year:'numeric'}:{weekday:'short',month:'short',day:'numeric'}) }
 function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
 // Button that stays neutral, lights up on hover, and turns green with a check once it has been pressed.
@@ -179,7 +193,7 @@ export default function App(){
     return ()=>{ clearInterval(t); window.removeEventListener('visibilitychange',ping); window.removeEventListener('beforeunload',ping) }
   },[session])
 
-  async function loadProfile(id){ const {data,error}=await supabase.from('profiles').select('*').eq('id',id).single(); if(error) console.error(error); setProfile(data||null) }
+  async function loadProfile(id){ const {data,error}=await supabase.from('profiles').select('*').eq('id',id).single(); if(error) console.error(error); setProfile(normP(data)||null) }
 
   if(!supabase) return <SetupScreen theme={theme} toggleTheme={toggleTheme}/>
   if(session===undefined) return <LoadingScreen/>
@@ -427,13 +441,27 @@ function WelcomeHero({profile,children,onCreate,createLabel}){
 }
 
 // Search + date (+ extras) bar used by trackers, members and backup.
+// Dropdown drawn in the app's own style (replaces the browser's grey menu). Works like <select>: pass <option>s as children.
+function Select({value,onChange,children,className='',disabled,style}){
+  const [open,setOpen]=useState(false); const [pos,setPos]=useState(null); const btn=useRef(null)
+  const opts=[]; Children.forEach(children,c=>{ if(c&&c.props){ const label=Array.isArray(c.props.children)?c.props.children.join(''):String(c.props.children??''); opts.push({value:c.props.value!==undefined?c.props.value:label,label}) } })
+  const cur=opts.find(o=>o.value===value)||opts[0]
+  function toggle(){ if(disabled) return; if(!open){ const r=btn.current.getBoundingClientRect(); const below=window.innerHeight-r.bottom-12; const up=below<190&&r.top>below; setPos({left:r.left,width:r.width,...(up?{bottom:window.innerHeight-r.top+6,maxHeight:Math.min(280,r.top-12)}:{top:r.bottom+6,maxHeight:Math.min(280,below)})}) } setOpen(!open) }
+  useEffect(()=>{ if(!open) return; const close=e=>{ if(e.type==='keydown'){ if(e.key==='Escape') setOpen(false); return } if(!e.target.closest?.('.sel-list')&&!btn.current?.contains(e.target)) setOpen(false) }; const off=()=>setOpen(false)
+    document.addEventListener('mousedown',close); document.addEventListener('keydown',close); window.addEventListener('resize',off); window.addEventListener('scroll',off,true)
+    return ()=>{ document.removeEventListener('mousedown',close); document.removeEventListener('keydown',close); window.removeEventListener('resize',off); window.removeEventListener('scroll',off,true) } },[open])
+  return <div className={`sel ${className.replace('filter-select','').trim()} ${open?'open':''}`} style={style}>
+    <button type="button" ref={btn} className="sel-btn" disabled={disabled} onClick={toggle} aria-haspopup="listbox" aria-expanded={open}><span>{cur?.label}</span><ChevronDown size={15} className="sel-chev"/></button>
+    {open && pos && <div className="sel-list" role="listbox" style={pos}>{opts.map(o=><button type="button" role="option" aria-selected={o.value===value} key={String(o.value)} className={o.value===value?'on':''} onClick={()=>{ onChange({target:{value:o.value}}); setOpen(false) }}><span>{o.label}</span>{o.value===value && <Check size={13}/>}</button>)}</div>}
+  </div>
+}
 function FilterBar({search,onSearch,date,onDate,children,onClear,extraActive,placeholder='Search…'}){
   const active=search||date||extraActive
   return <div className="panel filter-bar">
     <label className="grow">Search<div className="search-box"><Search size={15}/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder={placeholder}/></div></label>
     {onDate && <label>Date<DateField className="filter-date" value={date} onChange={onDate}/></label>}
     {children}
-    {active && <button className="text-btn" onClick={()=>{ onSearch(''); onDate&&onDate(''); onClear&&onClear() }}>Clear</button>}
+    <button type="button" className={`text-btn filter-clear ${active?'':'off'}`} disabled={!active} tabIndex={active?0:-1} onClick={()=>{ onSearch(''); onDate&&onDate(''); onClear&&onClear() }}>Clear</button>
   </div>
 }
 
@@ -443,7 +471,7 @@ function ToSortPanel({profile}){
   async function load(){
     const {data}=await supabase.from('schedules').select('id,title,start_at,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').order('start_at')
     const now=new Date()
-    setItems((data||[]).filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && !my.sorted && new Date(s.start_at)<=now }))
+    setItems((data||[]).filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && needsSort(my) && !my.sorted && new Date(s.start_at)<=now }))
   }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
   const mark=id=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',id).eq('member_id',profile.id)
@@ -480,7 +508,7 @@ function AdminDashboard({profile}){
   useEffect(()=>{ load() },[]); usePoll(load)
   async function load(){
     // Member counts show staff only — heads and the EDBO board are not counted here.
-    const {data:profiles}=await supabase.from('profiles').select('id,role').eq('active',true)
+    const profiles=await fetchActive()
     setCounts({ Media:(profiles||[]).filter(p=>p.role==='staff_media').length, Colorist:(profiles||[]).filter(p=>p.role==='staff_colorist').length })
     const {data:tasks}=await supabase.from('tasks').select('department,status')
     const {data:schedules}=await supabase.from('schedules').select('department,start_at,end_at,status')
@@ -538,7 +566,7 @@ function PostingTracker({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   const canPost=isAdminLike(profile.role)||profile.role==='art_director'
   async function load(){
-    const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,schedule_members(sorted)').eq('department','Media').order('start_at',{ascending:false}).limit(40)
+    const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(40)
     const {data:tasks}=await supabase.from('tasks').select('schedule_id,department,status').not('schedule_id','is',null)
     const statusFor=(eventId,dept)=>{
       const ts=(tasks||[]).filter(x=>x.schedule_id===eventId && x.department===dept)
@@ -547,7 +575,7 @@ function PostingTracker({profile}){
       return 'in progress'
     }
     setRows((events||[]).map(e=>{
-      const mem=e.schedule_members||[]; const done=mem.filter(m=>m.sorted).length
+      const mem=(e.schedule_members||[]).filter(needsSort); const done=mem.filter(m=>m.sorted).length
       const isSorted=e.status==='completed'||e.status==='done'
       return { id:e.id, date:new Date(e.start_at), title:e.title,
         supposedPost:new Date(new Date(e.start_at).getTime()+6*864e5),
@@ -577,7 +605,7 @@ function PostingTracker({profile}){
   </div>
 }
 
-function sortProgress(s){ const m=s.schedule_members||[]; if(!m.length) return ''; return ` • ${m.filter(x=>x.sorted).length}/${m.length} sorted` }
+function sortProgress(s){ const m=(s.schedule_members||[]).filter(needsSort); if(!m.length) return ''; return ` • ${m.filter(x=>x.sorted).length}/${m.length} sorted` }
 
 function HoursDashboard({profile}){
   const staff=isStaff(profile.role)
@@ -592,7 +620,7 @@ function HoursDashboard({profile}){
     const completed=rows.filter(s=>s.status==='completed'||s.status==='done')
     const hours=rows.reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
     let members=0
-    if(!staff){ const {data:p}=await supabase.from('profiles').select('id').eq('role','staff_media').eq('active',true); members=(p||[]).length }
+    if(!staff){ members=(await fetchActive()).filter(p=>p.role==='staff_media').length }
     setStats({upcoming:upcoming.length,completed:completed.length,total:rows.length,hours,members})
     setItems(upcoming.slice(0,6))
   }
@@ -614,6 +642,7 @@ function HoursDashboard({profile}){
       </>}
     </section>
     <ToSortPanel profile={profile}/>
+    {hasPostingTracker(profile.role) && <div style={{marginBottom:14}}><PostingTracker profile={profile}/></div>}
     {next && <div className="panel task-panel" style={{marginBottom:14}}>
       <div className="panel-title"><h2>Next up</h2></div>
       <strong style={{fontSize:16,display:'block',marginBottom:6}}>{next.title}</strong>
@@ -646,7 +675,7 @@ function TasksDashboard({profile}){
     let q=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name)').order('created_at',{ascending:false})
     if(worker) q=q.eq('assigned_to',profile.id); else q=q.in('department',managedTaskDepts(role))
     const {data}=await q; const list=data||[]
-    let members=0; if(!worker){ const {data:p}=await supabase.from('profiles').select('id').eq('role','staff_colorist').eq('active',true); members=(p||[]).length }
+    let members=0; if(!worker){ members=(await fetchActive()).filter(p=>p.role==='staff_colorist').length }
     setStats({ open:list.filter(t=>t.status!=='completed').length, done:list.filter(t=>t.status==='completed').length, total:list.length, members })
     setRows(list.slice(0,8))
     setUndone(list.filter(t=>t.status!=='completed'))
@@ -655,8 +684,8 @@ function TasksDashboard({profile}){
       const {data:ownTasks}=await supabase.from('tasks').select('schedule_id').eq('department','Colorist').not('schedule_id','is',null)
       const assignedIds=new Set((ownTasks||[]).map(t=>t.schedule_id))
       setAvail((done||[]).filter(e=>!assignedIds.has(e.id)))
-      const {data:tm}=await supabase.from('profiles').select('id,full_name,role').in('role',['staff_colorist',...BOARD_ASSIGNABLE]).eq('active',true).order('full_name')
-      setTeammates((tm||[]).filter(m=>m.id!==profile.id))
+      const tm=(await fetchActive()).filter(m=>m.role==='staff_colorist'||BOARD_ASSIGNABLE.includes(m.role))
+      setTeammates(tm.filter(m=>m.id!==profile.id))
     }
   }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
@@ -685,7 +714,7 @@ function TasksDashboard({profile}){
         <div className="assign-row">
           <button className="act-btn idle" onClick={()=>assignStage(e.id,e.title,[profile.id])}>Assign to myself</button>
           <div style={{flex:1,display:'grid',gap:8}}>
-            {[['STAFF',teammates.filter(m=>m.role==='staff_colorist')],['EDBO',teammates.filter(m=>isBoard(m.role))]].map(([lab,list])=>list.length>0 && <div key={lab}><div className="token-group-label">{lab}</div><div className="token-row">{list.map(m=><button type="button" key={m.id} className={`token ${picked.includes(m.id)?'active':''}`} onClick={()=>setPickList(e.id, picked.includes(m.id)?picked.filter(x=>x!==m.id):[...picked,m.id])}>{m.full_name}</button>)}</div></div>)}
+            {[['STAFF',teammates.filter(m=>m.role==='staff_colorist')],['EDBO',teammates.filter(m=>BOARD_ASSIGNABLE.includes(m.role)).sort(dirSort)]].map(([lab,list])=>list.length>0 && <div key={lab}><div className="token-group-label">{lab}</div><div className="token-row">{list.map(m=><button type="button" key={m.id} className={`token ${picked.includes(m.id)?'active':''}`} onClick={()=>setPickList(e.id, picked.includes(m.id)?picked.filter(x=>x!==m.id):[...picked,m.id])}>{m.full_name}</button>)}</div></div>)}
             {!teammates.length && <span style={{fontSize:11,color:'var(--text-dim)'}}>No one else to assign yet.</span>}</div>
           {picked.length>0 && <button className="act-btn idle" onClick={()=>assignStage(e.id,e.title,picked)}>Assign selected ({picked.length})</button>}
         </div>
@@ -726,7 +755,7 @@ function TaskTracker({profile}){
   return <div>
     <section className="page-head"><div><div className="eyebrow">COMPLETED WORK</div><h1>Tracker</h1><p>Everything finished, with who did it and when.</p></div></section>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event, task or person…" extraActive={!!deptFilter} onClear={()=>setDeptFilter('')}>
-      {privileged && <label>Department<select className="filter-select" value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}><option value="">All</option>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</select></label>}
+      {privileged && <label>Department<Select className="filter-select" value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}><option value="">All</option>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</Select></label>}
     </FilterBar>
     {privileged && <>
       <div className="eyebrow" style={{margin:'6px 0 8px'}}>EVENTS — MEDIA</div>
@@ -759,18 +788,18 @@ function localISO(v){ const d=new Date(v); return `${d.getFullYear()}-${String(d
 
 // Task pickers: Staff first, then the EDBO board members who can colorgrade.
 function taskAssigneeGroups(members){
-  return [{label:'STAFF',people:members.filter(m=>m.role==='staff_colorist')},{label:'EDBO',people:members.filter(m=>BOARD_ASSIGNABLE.includes(m.role))}]
+  return [{label:'STAFF',people:members.filter(m=>m.role==='staff_colorist')},{label:'EDBO',people:members.filter(m=>BOARD_ASSIGNABLE.includes(m.role)).sort(dirSort)}]
 }
 function useAssignees(){
   const [members,setMembers]=useState([])
-  useEffect(()=>{ (async()=>{ const {data}=await supabase.from('profiles').select('id,full_name,department,role').in('role',['staff_colorist',...BOARD_ASSIGNABLE]).eq('active',true).order('full_name'); setMembers(data||[]) })() },[])
+  useEffect(()=>{ (async()=>{ setMembers((await fetchActive()).filter(m=>m.role==='staff_colorist'||BOARD_ASSIGNABLE.includes(m.role))) })() },[])
   return members
 }
 // The task's department follows who it is for: Art Director work stays "Art Director", everything else is colorgrading.
 function deptFromAssignee(members,id){ return members.find(m=>m.id===id)?.role==='art_director'?'Art Director':'Colorist' }
 
 function TaskModal({profile,onClose,onSaved}){
-  const [form,setForm]=useState({title:'',description:'',assignedIds:[],assigned_date:todayISO()})
+  const [form,setForm]=useState({title:'Colorgrading',description:'',assignedIds:[],assigned_date:todayISO()})
   const members=useAssignees(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault()
     if(!form.assignedIds.length){ notifyDialog('Pick who the task is for.'); return }
@@ -895,9 +924,9 @@ function CalendarPage({profile}){
           <span>Where: {e.raw.location||'No location'}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status==='completed'?'sorted':e.raw.status}{e.raw.sorted_at?` (${fmtDay(e.raw.sorted_at,false)})`:''}</span></>}
         {e.type==='task' && <><span>{e.raw.department} • Assigned to {e.raw.profiles?.full_name||'Unassigned'}</span>
           <span>Assigned {fmtDay(e.raw.assigned_date)}{e.raw.completed_at?` • Done ${fmtDay(e.raw.completed_at)}`:''}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status.replace('_',' ')}</span></>}
-        {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id} className={`${m.sorted?'done':''} ${m.member_id===profile.id?'me':''}`}>{crewText(m)}{m.sorted?' ✓ sorted':' • pending'}{m.member_id===profile.id?' (you)':''}</span>)}</div>}
+        {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id} className={`${m.sorted?'done':''} ${m.member_id===profile.id?'me':''}`}>{crewText(m)}{!needsSort(m)?'':m.sorted?' ✓ sorted':' • pending'}{m.member_id===profile.id?' (you)':''}</span>)}</div>}
         <div style={{marginTop:8,display:'flex',gap:8,flexWrap:'wrap'}}>
-          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted) && <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>}
+          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted && needsSort(m)) && <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>}
           {editMode && e.type==='schedule' && e.raw.status!=='completed' && isAdminLike(role) && <button className="ghost-btn" onClick={()=>markAllSorted(e.raw)}>Mark all sorted</button>}
           {e.type==='task' && e.raw.status!=='completed' && (e.raw.assigned_to===profile.id || isAdminLike(role)) && <ActionButton label={e.raw.department==='Colorist'?'Colorgraded':'Mark done'} doneLabel={e.raw.department==='Colorist'?'Colorgraded':'Done'} run={()=>markTaskDone(e.raw.id)} after={load}/>}
           {editMode && canEdit(e) && <button className="ghost-btn" onClick={()=>setEditItem(e)}><Pencil size={13}/> Edit</button>}
@@ -914,7 +943,7 @@ function CalendarPage({profile}){
 
 // Who is on an event: Media first, then EDBO. Tapping a name adds them and pops the duty tags (PM / PC / VM / VC) right beside it.
 function CrewPicker({people,value,onChange}){
-  const groups=[{label:'MEDIA',people:people.filter(p=>['staff_media','head_media'].includes(p.role))},{label:'EDBO',people:people.filter(p=>BOARD_ASSIGNABLE.includes(p.role))}]
+  const groups=[{label:'STAFF',people:people.filter(p=>p.role==='staff_media')},{label:'EDBO',people:people.filter(p=>EVENT_BOARD.includes(p.role)).sort(dirSort)}]
   function toggle(id){ const n={...value}; if(n[id]) delete n[id]; else n[id]=[]; onChange(n) }
   function duty(id,d){ const cur=value[id]||[]; onChange({...value,[id]:cur.includes(d)?cur.filter(x=>x!==d):[...cur,d]}) }
   return <div className="token-picker">
@@ -929,7 +958,7 @@ function CrewPicker({people,value,onChange}){
 
 function useEventPeople(){
   const [people,setPeople]=useState([])
-  useEffect(()=>{ (async()=>{ const {data}=await supabase.from('profiles').select('id,full_name,role').in('role',['staff_media','head_media',...BOARD_ASSIGNABLE]).eq('active',true).order('full_name'); setPeople(data||[]) })() },[])
+  useEffect(()=>{ (async()=>{ setPeople((await fetchActive()).filter(m=>m.role==='staff_media'||EVENT_BOARD.includes(m.role))) })() },[])
   return people
 }
 
@@ -1054,7 +1083,7 @@ function Announcements({profile}){
 function AnnouncementModal({profile,onClose,onSaved}){
   const [form,setForm]=useState({title:'',body:'',audience:'all',target:[]})
   const [people,setPeople]=useState([]); const [busy,setBusy]=useState(false)
-  useEffect(()=>{ (async()=>{ const {data}=await supabase.from('profiles').select('id,full_name,role,department').eq('active',true).order('full_name'); setPeople((data||[]).filter(p=>ROLE_META[p.role])) })() },[])
+  useEffect(()=>{ (async()=>{ const data=await fetchActive(); setPeople(data.filter(p=>ROLE_META[p.role])) })() },[])
   async function save(e){ e.preventDefault(); setBusy(true)
     let recipients=[]
     if(form.audience==='all') recipients=people.map(p=>p.id)
@@ -1069,9 +1098,9 @@ function AnnouncementModal({profile,onClose,onSaved}){
   return <Modal title="New announcement" onClose={onClose}><form onSubmit={save}>
     <label>Header<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
     <label>Body<textarea required value={form.body} onChange={e=>setForm({...form,body:e.target.value})}/></label>
-    <label>Send to<select value={form.audience} onChange={e=>setForm({...form,audience:e.target.value})}>
+    <label>Send to<Select value={form.audience} onChange={e=>setForm({...form,audience:e.target.value})}>
       <option value="all">Everyone</option><option value="heads">All heads</option><option value="staff">All staff</option><option value="custom">Specific people…</option>
-    </select></label>
+    </Select></label>
     {form.audience==='custom' && <><label>Recipients</label>
       <PersonPicker groups={[
         {label:'MEDIA',people:people.filter(p=>p.role==='staff_media')},
@@ -1090,10 +1119,9 @@ function Members({profile}){
   const [group,setGroup]=useState(''); const [search,setSearch]=useState('')
   const all=seesAll(profile.role); const canCreate=canManageAccounts(profile.role)
   async function load(){
-    let q=supabase.from('profiles').select('*').order('full_name')
-    if(!all) q=q.eq('role',profile.role==='head_media'?'staff_media':'staff_colorist')
-    const {data}=await q
-    setRows((data||[]).filter(m=>ROLE_META[m.role]&&m.active!==false||m.role==='admin').sort((a,b)=>roleRank(a.role)-roleRank(b.role)||a.full_name.localeCompare(b.full_name)))
+    let data=await fetchProfiles()
+    if(!all) data=data.filter(m=>m.role===(profile.role==='head_media'?'staff_media':'staff_colorist'))
+    setRows(data.filter(m=>ROLE_META[m.role]&&m.active!==false||m.role==='admin').sort(dirSort))
   }
   useEffect(()=>{ load() },[profile.id])
   const q=search.trim().toLowerCase()
@@ -1102,14 +1130,17 @@ function Members({profile}){
     <section className="page-head"><div><div className="eyebrow">{group?group.toUpperCase():'THE TEAM'}</div><h1>Members{group?` — ${group}`:''}</h1><p>Click a member to see their full activity.</p></div>
       {canCreate && <button className="primary-btn" onClick={()=>setOpen(true)}><Plus size={17}/> Create account</button>}</section>
     <FilterBar search={search} onSearch={setSearch} placeholder="Search a name or position…" extraActive={!!group} onClear={()=>setGroup('')}>
-      {all && <label>Section<select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></select></label>}
+      {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
     </FilterBar>
-    <div className="members-grid">{shown.map(m=><div className="panel member-card" key={m.id} onClick={()=>setDetail(m)}>
-      <div className="member-top"><div className="avatar large">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>{m.active && <span className="active-dot">● active</span>}</div>
-      <h3>{m.full_name}</h3><p>{m.role==='admin'?'Admin':groupOf(m.role)==='EDBO'?`EDBO · ${roleLabel(m)}`:roleLabel(m)}</p>
-      <div className="member-meta"><span>{groupOf(m.role)}</span><span>{m.position||'—'}</span></div>
-    </div>)}
-      {!shown.length && <div className="panel empty">No members found.</div>}</div>
+    {SECTION_ORDER.map(sec=>{ const list=shown.filter(m=>groupOf(m.role)===sec); return list.length>0 && <div key={sec} className="members-section">
+      <div className="members-section-head"><h2>{sec==='Admin'?'Admin':sec==='EDBO'?'EDBO team':sec==='Media'?'Media team':'Colorist team'}</h2><span>{list.length}</span></div>
+      <div className="members-grid">{list.map(m=><div className="panel member-card" key={m.id} onClick={()=>setDetail(m)}>
+        <div className="member-top"><div className="avatar large">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>{m.active && <span className="active-dot">● active</span>}</div>
+        <h3>{m.full_name}</h3><p>{sec==='EDBO'?`EDBO · ${roleLabel(m)}`:roleLabel(m)}</p>
+        <div className="member-meta"><span>{sec}</span><span>{sec==='EDBO'?(m.position||'—'):(m.position||'—')}</span></div>
+      </div>)}</div>
+    </div> })}
+    {!shown.length && <div className="panel empty">No members found.</div>}
     {open && <CreateAccountModal profile={profile} onClose={()=>setOpen(false)} onSaved={load}/>}
     {detail && <MemberDetailModal member={detail} onClose={()=>setDetail(null)}/>}
   </div>
@@ -1153,19 +1184,14 @@ function groupAndPositionOf(m){
   if(m.role==='edbo'){ const hit=EDBO_POSITIONS.find(([l,r])=>r==='edbo'&&l===m.position); return {group:'EDBO',position:hit?hit[0]:'Finance'} }
   const hit=EDBO_POSITIONS.find(([,r])=>r===m.role); return {group:'EDBO',position:hit?hit[0]:'EIC'}
 }
-function roleFromChoice(group,position){
-  if(group==='Admin') return 'admin'
-  if(group==='Media') return 'staff_media'
-  if(group==='Colorist') return 'staff_colorist'
-  return (EDBO_POSITIONS.find(([l])=>l===position)||EDBO_POSITIONS[0])[1]
-}
-function deptForRole(r){ return ROLE_META[r]?.dept || 'Admin' }
+function roleFromChoice(group){ return DB_ROLE[group]||'media' }
+function deptForRole(group){ return group }
 function AccountFields({form,setForm}){
   return <>
     <div className="form-row">
-      <label>Section<select value={form.group} onChange={e=>setForm({...form,group:e.target.value,position:e.target.value==='EDBO'?'EIC':''})}>{ACCOUNT_GROUPS.map(g=><option key={g}>{g}</option>)}</select></label>
+      <label>Section<Select value={form.group} onChange={e=>setForm({...form,group:e.target.value,position:e.target.value==='EDBO'?'EIC':''})}>{ACCOUNT_GROUPS.map(g=><option key={g}>{g}</option>)}</Select></label>
       {form.group==='EDBO'
-        ? <label>EDBO position<select value={form.position} onChange={e=>setForm({...form,position:e.target.value})}>{EDBO_POSITIONS.map(([l])=><option key={l}>{l}</option>)}</select></label>
+        ? <label>EDBO position<Select value={form.position} onChange={e=>setForm({...form,position:e.target.value})}>{EDBO_POSITIONS.map(([l])=><option key={l}>{l}</option>)}</Select></label>
         : form.group==='Admin' ? <label>Position title<input value="Admin" disabled/></label>
         : <label>Position title<input value={form.position} onChange={e=>setForm({...form,position:e.target.value})} placeholder={form.group==='Media'?'e.g. Photographer':'e.g. Colorist'}/></label>}
     </div>
@@ -1177,9 +1203,9 @@ function CreateAccountModal({profile,onClose,onSaved}){
   const [form,setForm]=useState({full_name:'',email:'',password:'',group:'Media',position:'',avatar_url:''})
   const [busy,setBusy]=useState(false); const [err,setErr]=useState('')
   async function save(e){ e.preventDefault(); setBusy(true); setErr('')
-    const role=roleFromChoice(form.group,form.position)
+    const role=roleFromChoice(form.group)
     const {data:{session}}=await supabase.auth.getSession()
-    const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,{ method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`}, body:JSON.stringify({full_name:form.full_name,email:form.email,password:form.password,department:deptForRole(role),role,position:form.group==='Admin'?'Admin':form.position,avatar_url:form.avatar_url||null}) })
+    const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,{ method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`}, body:JSON.stringify({full_name:form.full_name,email:form.email,password:form.password,department:deptForRole(form.group),role,position:form.group==='Admin'?'Admin':form.position,avatar_url:form.avatar_url||null}) })
     const json=await res.json().catch(()=>({})); setBusy(false)
     if(!res.ok){ setErr(json.error||'Something went wrong.'); return }
     onClose(); onSaved()
@@ -1266,13 +1292,13 @@ function ResourceModal({profile,onClose,onSaved}){
 function Settings({profile}){
   const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null); const [reset,setReset]=useState(null); const [filter,setFilter]=useState(''); const [search,setSearch]=useState('')
   useEffect(()=>{ load() },[])
-  async function load(){ const {data}=await supabase.from('profiles').select('*').order('full_name'); setRows(data||[]) }
+  async function load(){ setRows((await fetchProfiles()).sort(dirSort)) }
   const q=search.trim().toLowerCase()
-  const filtered=rows.filter(m=>(!filter||(filter==='Old roles'?!ROLE_META[m.role]:ROLE_META[m.role]&&(m.role==='admin'?filter==='Admin':groupOf(m.role)===filter)))&&(!q||`${m.full_name} ${m.email||''} ${m.position||''}`.toLowerCase().includes(q)))
+  const filtered=rows.filter(m=>(!filter||groupOf(m.role)===filter)&&(!q||`${m.full_name} ${m.email||''} ${m.position||''}`.toLowerCase().includes(q)))
   return <div>
     <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Settings</h1><p>Edit member profiles or reset a password.</p></div></section>
     <FilterBar search={search} onSearch={setSearch} placeholder="Search name, email or position…" extraActive={!!filter} onClear={()=>setFilter('')}>
-      <label>Section<select value={filter} onChange={e=>setFilter(e.target.value)} className="filter-select"><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option><option>Old roles</option></select></label>
+      <label>Section<Select value={filter} onChange={e=>setFilter(e.target.value)} className="filter-select"><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>
     </FilterBar>
     <div className="panel">{filtered.map(m=><div className="settings-row" key={m.id}>
       <div className="settings-who">
@@ -1295,8 +1321,8 @@ function EditMemberModal({member,onClose,onSaved}){
   const [form,setForm]=useState({full_name:member.full_name,group:start.group,position:start.position,active:member.active,avatar_url:member.avatar_url||''})
   const [busy,setBusy]=useState(false); const [err,setErr]=useState('')
   async function save(e){ e.preventDefault(); setBusy(true); setErr('')
-    const role=roleFromChoice(form.group,form.position)
-    try{ await callManageUser({action:'update_profile',userId:member.id,full_name:form.full_name,avatar_url:form.avatar_url,active:form.active,role,department:deptForRole(role),position:form.group==='Admin'?'Admin':form.position}); onClose(); onSaved() } catch(e){ setErr(e.message) }
+    const role=roleFromChoice(form.group)
+    try{ await callManageUser({action:'update_profile',userId:member.id,full_name:form.full_name,avatar_url:form.avatar_url,active:form.active,role,department:deptForRole(form.group),position:form.group==='Admin'?'Admin':form.position}); onClose(); onSaved() } catch(e){ setErr(e.message) }
     setBusy(false)
   }
   return <Modal title={`Edit ${member.full_name}`} onClose={onClose}><form onSubmit={save}>
@@ -1333,7 +1359,7 @@ function Backup({profile}){
   const scope=all?'ALL':profile.department
   async function load(){
     const {data:intg}=await supabase.from('integrations').select('*').eq('scope',scope).maybeSingle(); setSheetUrl(intg?.sheet_webhook_url||''); setUrlDraft(u=>u||intg?.sheet_webhook_url||'')
-    const {data:profiles}=await supabase.from('profiles').select('id,full_name,position,role').eq('active',true)
+    const profiles=await fetchActive()
     const {data:tasks}=await supabase.from('tasks').select('assigned_to,title,assigned_date,completed_at,status')
     const {data:scheds}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
     const nameOf=id=>(profiles||[]).find(p=>p.id===id)?.full_name||''
@@ -1370,7 +1396,7 @@ function Backup({profile}){
       </div>
     </div>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Name, event or media…" extraActive={!!group} onClear={()=>setGroup('')}>
-      {all && <label>Section<select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></select></label>}
+      {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
     </FilterBar>
     <div className="panel table-panel" style={{marginBottom:14}}>
       <div className="panel-title" style={{padding:'21px 21px 12px'}}><h2>People</h2><div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{shownPeople.length} people</span><button className="text-btn" onClick={()=>downloadCSV('backup-summary.csv',summaryCSV)}><Download size={13}/> Summary CSV</button><button className="text-btn" onClick={()=>downloadCSV('backup-detail.csv',detailCSV)}><Download size={13}/> Detail CSV</button></div></div>
