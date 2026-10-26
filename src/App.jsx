@@ -337,12 +337,16 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
 
 /* ---------------- Notifications ---------------- */
 function NotificationBell({profile}){
-  const [open,setOpen]=useState(false); const [rows,setRows]=useState([])
+  const [open,setOpen]=useState(false); const [rows,setRows]=useState([]); const wrap=useRef(null)
+  // Clicking anywhere else (or pressing Esc) closes the notification box.
+  useEffect(()=>{ if(!open) return; const away=e=>{ if(wrap.current && !wrap.current.contains(e.target)) setOpen(false) }; const esc=e=>{ if(e.key==='Escape') setOpen(false) }
+    document.addEventListener('mousedown',away); document.addEventListener('touchstart',away); document.addEventListener('keydown',esc)
+    return ()=>{ document.removeEventListener('mousedown',away); document.removeEventListener('touchstart',away); document.removeEventListener('keydown',esc) } },[open])
   useEffect(()=>{ load(); const t=setInterval(load,45000); return ()=>clearInterval(t) },[profile.id])
   async function load(){ const {data}=await supabase.from('notifications').select('*').eq('user_id',profile.id).eq('read',false).order('created_at',{ascending:false}).limit(25); setRows(data||[]) }
   async function markRead(id){ setRows(r=>r.filter(x=>x.id!==id)); await supabase.from('notifications').update({read:true}).eq('id',id) }
   async function markAllRead(){ const ids=rows.map(r=>r.id); if(!ids.length) return; setRows([]); await supabase.from('notifications').update({read:true}).in('id',ids) }
-  return <div className="notif-wrap">
+  return <div className="notif-wrap" ref={wrap}>
     <button className="icon-btn" onClick={()=>setOpen(o=>!o)}><Bell size={16}/>{rows.length>0 && <span className="notif-dot">{rows.length>9?'9+':rows.length}</span>}</button>
     {open && <div className="notif-dropdown">
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 6px 10px'}}><strong style={{fontSize:12}}>Notifications</strong>{rows.length>0 && <button className="text-btn" onClick={markAllRead}>Mark all read</button>}</div>
@@ -483,6 +487,22 @@ function ToSortPanel({profile}){
       <ActionButton label="Sorted" run={()=>mark(s.id)} after={load}/></div>)}</div>
   </div>
 }
+// Upcoming events I am on. EDBO (EIC, AEIC, TD, Art Director…) only see this when they actually have an event duty.
+function MyEventsPanel({profile}){
+  const [items,setItems]=useState([])
+  async function load(){
+    const {data}=await supabase.from('schedules').select('id,title,start_at,end_at,location,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').neq('status','done').order('start_at')
+    const startOfToday=new Date(); startOfToday.setHours(0,0,0,0)
+    setItems((data||[]).filter(s=>new Date(s.end_at)>=startOfToday && (s.schedule_members||[]).some(m=>m.member_id===profile.id)).slice(0,6))
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  if(!items.length) return null
+  return <div className="panel task-panel" style={{marginBottom:14}}>
+    <div className="panel-title"><h2>My events</h2></div>
+    <div className="task-list">{items.map(s=>{ const me=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return <div className="task-row" key={s.id}><div className="task-icon media"><CalendarDays size={16}/></div>
+      <div className="task-info"><strong>{s.title}{(me?.duties||[]).length>0 && <em className="duty-tag">{me.duties.join('/')}</em>}</strong><span>{fmtDay(s.start_at,false)} • {fmtTime(s.start_at)}–{fmtTime(s.end_at)} • {s.location||'No location'}{crewLine(s,profile.id)}</span></div></div> })}</div>
+  </div>
+}
 function crewLine(s,myId){ const o=(s.schedule_members||[]).filter(m=>m.member_id!==myId).map(m=>crewText(m)).filter(Boolean); return o.length?` • With ${o.join(', ')}`:'' }
 
 // Tasks assigned to me (shown on Admin / EDBO dashboards, since they sometimes colorgrade or do cover work too).
@@ -556,6 +576,7 @@ function AdminDashboard({profile}){
       </div>
     </Modal>}
     {!isViewer(profile.role) && <ToSortPanel profile={profile}/>}
+    {!isViewer(profile.role) && <MyEventsPanel profile={profile}/>}
     {!isViewer(profile.role) && <MyTasksPanel profile={profile}/>}
     {hasPostingTracker(profile.role) && <PostingTracker profile={profile}/>}
   </div>
@@ -706,6 +727,7 @@ function TasksDashboard({profile}){
       <Stat title="Total Tasks" value={stats.total} note="All time" icon={ClipboardCheck}/>
     </section>
     <ToSortPanel profile={profile}/>
+    <MyEventsPanel profile={profile}/>
     {td && <div className="panel" style={{marginBottom:14}}>
       <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Ready for {TD_STAGE.verb}</h2></div>
       {!avail.length && <div className="empty" style={{padding:'0 21px 21px'}}>No sorted events waiting.</div>}
