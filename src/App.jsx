@@ -49,7 +49,24 @@ function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p
 function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
 // Semester filter: 2nd semester is what everyone sees by default; 1st semester is the imported archive, kept for checking.
 const SEM_OPTIONS=[['2','2nd semester'],['1','1st semester']]
-const inSem=(x,sem)=>(x.semester??2)===Number(sem)
+const inSem=(x,sem)=>sem==='all'||(x.semester??2)===Number(sem)
+const evHours=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
+// Switch for the top right of a page: 1st sem / 2nd sem / Both.
+function SemSwitch({value,onChange}){
+  return <div className="seg-switch sem-switch" role="tablist">{[['1','1st sem'],['2','2nd sem'],['all','Both']].map(([v,l])=><button type="button" key={v} className={value===v?'on':''} onClick={()=>onChange(v)}>{l}</button>)}</div>
+}
+// One box that always shows both semesters: total, 1st, 2nd and the split bar.
+function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
+  const t=h1+h2; const p1=t?h1/t*100:0; const f=n=>unit==='hrs'?n.toFixed(1):String(n)
+  return <div className="panel sem-box">
+    <div className="sem-main"><small>{label}</small><div className="sem-big">{f(t)}<span>{unit}</span></div></div>
+    <div className="sem-divider"/>
+    <div className="sem-part"><small>1st sem</small><div>{f(h1)}</div></div>
+    <div className="sem-part"><small>2nd sem</small><div>{f(h2)}</div></div>
+    <div className="sem-split"><div className="sem-legend"><span className="l1">1st sem</span><span className="l2">2nd sem</span></div>
+      <div className="sem-bar"><i style={{width:`${p1}%`,background:'#b2b6ae'}}/><i style={{width:`${100-p1}%`,background:'var(--sand)'}}/></div></div>
+  </div>
+}
 function SemesterSelect({value,onChange}){ return <label>Semester<Select className="filter-select" value={value} onChange={e=>onChange(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label> }
 // Everyone who covered an event: linked crew first, then names carried over from the old sheet.
 function mediaNames(e){ return [...(e.schedule_members||[]).map(m=>crewText(m)).filter(Boolean),...(e.legacy_media?[e.legacy_media]:[])].join(', ') }
@@ -444,10 +461,11 @@ function PersonPicker({groups,value,multi,onChange,emptyLabel='No one available 
 }
 
 /* ---------------- Dashboards ---------------- */
-function WelcomeHero({profile,children,onCreate,createLabel}){
+function WelcomeHero({profile,children,onCreate,createLabel,aside}){
   return <section className="hero">
     <div><div className="eyebrow"><Sparkles size={14}/> {seesAll(profile.role)?'COMMAND CENTER':(roleDept(profile.role)||'').toUpperCase()+' DESK'}</div>
     <h1>{greet()}, {profile.full_name.split(' ')[0]}.</h1><p>{WELCOME_LINE}</p></div>
+    {aside}
     {onCreate && <button className="primary-btn" onClick={onCreate}><Plus size={17}/> {createLabel}</button>}
   </section>
 }
@@ -530,31 +548,30 @@ function MyTasksPanel({profile}){
 
 const CARD_GROUPS=['Media','Colorist']
 function AdminDashboard({profile}){
-  const [metrics,setMetrics]=useState({})
+  const [raw,setRaw]=useState({tasks:[],schedules:[]})
   const [counts,setCounts]=useState({})
-  const [detail,setDetail]=useState(null)
+  const [detail,setDetail]=useState(null); const [sem,setSem]=useState('2')
   useEffect(()=>{ load() },[]); usePoll(load)
   async function load(){
     // Member counts show staff only — heads and the EDBO board are not counted here.
     const profiles=await fetchActive()
     setCounts({ Media:(profiles||[]).filter(p=>p.role==='staff_media').length, Colorist:(profiles||[]).filter(p=>p.role==='staff_colorist').length })
-    const {data:tasks}=await supabase.from('tasks').select('department,status')
-    const {data:schedules}=await supabase.from('schedules').select('department,start_at,end_at,status')
-    const hrs=(schedules||[]).filter(s=>s.department==='Media').reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
-    setMetrics({ Media:{value:hrs.toFixed(1),label:'hrs logged'}, Colorist:{value:(tasks||[]).filter(t=>t.department==='Colorist'&&t.status==='completed').length,label:'tasks done'} })
+    const {data:tasks}=await supabase.from('tasks').select('department,status,semester')
+    const {data:schedules}=await supabase.from('schedules').select('department,start_at,end_at,status,semester')
+    setRaw({tasks:tasks||[],schedules:(schedules||[]).filter(s=>s.department==='Media')})
   }
-  async function openDetail(d){
+  const hrsFor=k=>raw.schedules.filter(s=>inSem(s,k)).reduce((a,s)=>a+evHours(s),0)
+  const metrics={ Media:{value:hrsFor(sem).toFixed(1),label:'hrs logged'}, Colorist:{value:raw.tasks.filter(t=>inSem(t,sem)&&t.department==='Colorist'&&t.status==='completed').length,label:'tasks done'} }
+  function openDetail(d){
     let stats={upcoming:0,ongoing:0,done:0,totalHours:0,totalTasks:0}
     if(d==='Media'){
-      const {data}=await supabase.from('schedules').select('start_at,end_at,status').eq('department','Media')
-      const now=new Date(); const rows=data||[]
+      const now=new Date(); const rows=raw.schedules.filter(s=>inSem(s,sem))
       stats.upcoming=rows.filter(s=>new Date(s.start_at)>=now).length
       stats.ongoing=rows.filter(s=>{ const st=new Date(s.start_at),en=new Date(s.end_at); return now>=st && now<=en }).length
       stats.done=rows.filter(s=>s.status==='completed'||s.status==='done').length
       stats.totalHours=rows.reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
     } else {
-      const {data}=await supabase.from('tasks').select('status').eq('department',d)
-      const rows=data||[]
+      const rows=raw.tasks.filter(t=>t.department===d&&inSem(t,sem))
       stats.upcoming=rows.filter(t=>t.status==='not_started').length
       stats.ongoing=rows.filter(t=>t.status==='in_progress').length
       stats.done=rows.filter(t=>t.status==='completed').length
@@ -563,7 +580,8 @@ function AdminDashboard({profile}){
     setDetail({dept:d,stats})
   }
   return <div>
-    <WelcomeHero profile={profile}/>
+    <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
     <div className="dept-grid two">{CARD_GROUPS.map(d=>{ const Icon=DEPT_ICON[d]; return <div key={d} className="panel dept-card" onClick={()=>openDetail(d)}>
       <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p>{counts[d]||0} members</p>
       <div className="dept-metric">{metrics[d]?.value ?? '—'}<small>{metrics[d]?.label}</small></div>
@@ -586,15 +604,15 @@ function AdminDashboard({profile}){
     {!isViewer(profile.role) && <ToSortPanel profile={profile}/>}
     {!isViewer(profile.role) && <MyEventsPanel profile={profile}/>}
     {!isViewer(profile.role) && <MyTasksPanel profile={profile}/>}
-    {hasPostingTracker(profile.role) && <PostingTracker profile={profile}/>}
+    {hasPostingTracker(profile.role) && <PostingTracker profile={profile} sem={sem}/>}
   </div>
 }
 
 /* ---------------- Posting Tracker: status of every Media event, from shoot to Facebook post (Admin / EIC / AEIC / TD / Art Director) ---------------- */
-function PostingTracker({profile}){
+function PostingTracker({profile,sem:semIn}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   const canPost=isAdminLike(profile.role)||profile.role==='art_director'
-  const [sem,setSem]=useState('2')
+  const [semOwn,setSem]=useState('2'); const sem=semIn??semOwn
   async function load(){
     const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,semester,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(300)
     const {data:tasks}=await supabase.from('tasks').select('schedule_id,department,status').not('schedule_id','is',null)
@@ -619,7 +637,7 @@ function PostingTracker({profile}){
   const markPosted=id=>supabase.rpc('mark_event_posted',{sid:id})
   const cls=v=>v==='completed'?'completed':v==='in progress'?'in_progress':'scheduled'
   return <div className="panel table-panel" style={{marginTop:14}}>
-    <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2><div className="mini-filter"><Select value={sem} onChange={e=>setSem(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></div></div>
+    <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2>{semIn===undefined && <div className="mini-filter"><Select value={sem} onChange={e=>setSem(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></div>}</div>
     <div>
       <div className="table-head posting-row"><span>Event Date</span><span>Event Name</span><span>Post By</span><span>Sorted</span><span>Colorgrade</span><span>FB Cover</span><span>Posted</span><span>Posted On</span></div>
       {loading ? <div className="empty">Loading…</div> : rows.map(r=><div className="table-row posting-row" key={r.id}>
@@ -639,25 +657,26 @@ function sortProgress(s){ const m=(s.schedule_members||[]).filter(needsSort); if
 
 function HoursDashboard({profile}){
   const staff=isStaff(profile.role)
-  const [stats,setStats]=useState({upcoming:0,completed:0,total:0,hours:0,members:0})
+  const [members,setMembers]=useState(0); const [allRows,setAllRows]=useState([]); const [sem,setSem]=useState('2')
   const [items,setItems]=useState([])
   async function load(){
     const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department',profile.department).order('start_at',{ascending:true})
     let rows=data||[]
     if(staff) rows=rows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===profile.id))
     const now=new Date()
-    const upcoming=rows.filter(s=>new Date(s.start_at)>=now)
-    const completed=rows.filter(s=>s.status==='completed'||s.status==='done')
-    const hours=rows.reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
-    let members=0
-    if(!staff){ members=(await fetchActive()).filter(p=>p.role==='staff_media').length }
-    setStats({upcoming:upcoming.length,completed:completed.length,total:rows.length,hours,members})
+    const upcoming=rows.filter(s=>new Date(s.start_at)>=now && (s.semester??2)===2)
+    if(!staff){ setMembers((await fetchActive()).filter(p=>p.role==='staff_media').length) }
+    setAllRows(rows)
     setItems(upcoming.slice(0,6))
   }
+  const semRows=allRows.filter(s=>inSem(s,sem)); const nowT=new Date()
+  const hrsSem=k=>allRows.filter(s=>inSem(s,k)).reduce((a,s)=>a+evHours(s),0)
+  const stats={ upcoming:semRows.filter(s=>new Date(s.start_at)>=nowT).length, completed:semRows.filter(s=>s.status==='completed'||s.status==='done').length, total:semRows.length, hours:hrsSem(sem), members }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
   const next=items[0]
   return <div>
-    <WelcomeHero profile={profile}/>
+    <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={hrsSem('1')} h2={hrsSem('2')} label={staff?'My total hours':'Team total hours'}/>
     <section className="stats-grid">
       {staff ? <>
         <Stat title="Upcoming Events" value={stats.upcoming} note="Coming up" icon={CalendarDays}/>
@@ -672,7 +691,7 @@ function HoursDashboard({profile}){
       </>}
     </section>
     <ToSortPanel profile={profile}/>
-    {hasPostingTracker(profile.role) && <div style={{marginBottom:14}}><PostingTracker profile={profile}/></div>}
+    {hasPostingTracker(profile.role) && <div style={{marginBottom:14}}><PostingTracker profile={profile} sem={sem}/></div>}
     {next && <div className="panel task-panel" style={{marginBottom:14}}>
       <div className="panel-title"><h2>Next up</h2></div>
       <strong style={{fontSize:16,display:'block',marginBottom:6}}>{next.title}</strong>
@@ -1387,7 +1406,7 @@ function Backup({profile}){
   const canSetLink=isAdminLike(role)||isHead(role)
   const showEvents=all||role==='head_media'
   const fixedGroup=all?'':(role==='head_media'?'Media':'Colorist')
-  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2')
+  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2'); const [tot,setTot]=useState({h1:0,h2:0,unit:'hrs'})
   const [sheetUrl,setSheetUrl]=useState(''); const [urlDraft,setUrlDraft]=useState(''); const [saved,setSaved]=useState(false)
   const [people,setPeople]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
   const scope=all?'ALL':profile.department
@@ -1397,6 +1416,9 @@ function Backup({profile}){
     const {data:tasks0}=await supabase.from('tasks').select('id,assigned_to,title,assigned_date,completed_at,status,semester,department,schedule_id')
     const {data:scheds0}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,semester,legacy_media,legacy_colorist,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
     const tasks=(tasks0||[]).filter(t=>inSem(t,sem)); const scheds=(scheds0||[]).filter(s=>inSem(s,sem))
+    const hrsIn=(list,k,id)=>list.filter(s=>inSem(s,k)&&(!id||(s.schedule_members||[]).some(m=>m.member_id===id))).reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
+    if(showEvents) setTot({h1:hrsIn(scheds0||[],'1'),h2:hrsIn(scheds0||[],'2'),unit:'hrs'})
+    else { const done=k=>(tasks0||[]).filter(t=>inSem(t,k)&&t.status==='completed'&&(profiles||[]).some(p=>p.id===t.assigned_to&&groupOf(p.role)==='Colorist'&&isStaff(p.role))).length; setTot({h1:done('1'),h2:done('2'),unit:'tasks'}) }
     const nameOf=id=>(profiles||[]).find(p=>p.id===id)?.full_name||''
     const hrsOf=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
     const list=(profiles||[]).filter(p=>ROLE_META[p.role]&&p.role!=='admin'&&(!fixedGroup||groupOf(p.role)===fixedGroup)&&(!fixedGroup||isStaff(p.role))).map(p=>{
@@ -1406,7 +1428,7 @@ function Backup({profile}){
         ...mineE.map(s=>{ const d=(s.schedule_members.find(m=>m.member_id===p.id)?.duties||[]); return {iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Duty:d.join('/'),Range:`${fmtTime(s.start_at)} → ${fmtTime(s.end_at)}`,Value:`${hrsOf(s).toFixed(1)} h`} }),
         ...mineT.map(t=>({iso:t.assigned_date||'',Date:fmtDay(t.assigned_date),Event:t.title,Duty:'',Range:`${fmtDay(t.assigned_date,false)} → ${t.completed_at?fmtDay(t.completed_at,false):'not done yet'}`,Value:t.status.replace('_',' ')}))
       ].sort((a,b)=>String(a.iso).localeCompare(String(b.iso)))
-      return { id:p.id, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
+      return { id:p.id, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), H1:hrsIn(scheds0||[],'1',p.id), H2:hrsIn(scheds0||[],'2',p.id), Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
     }).sort((a,b)=>a.Name.localeCompare(b.Name))
     setPeople(list)
     setEvents((scheds||[]).map(s=>({id:s.id,iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Medias:[...(s.schedule_members||[]).map(m=>`${nameOf(m.member_id)}${(m.duties||[]).length?` (${m.duties.join('/')})`:''}`),...(s.legacy_media?[s.legacy_media]:[])].filter(Boolean).join(', '),Colorist:[...tasks.filter(t=>t.schedule_id===s.id&&t.department==='Colorist').map(t=>nameOf(t.assigned_to)),...(s.legacy_colorist?[s.legacy_colorist]:[])].filter(Boolean).join(', '),Hours:hrsOf(s).toFixed(1)})))
@@ -1417,11 +1439,12 @@ function Backup({profile}){
   const q=search.trim().toLowerCase()
   const shownPeople=people.filter(p=>(!group||p.Section===group)&&(!q||`${p.Name} ${p.Position}`.toLowerCase().includes(q))&&(!dateFilter||p.rows.some(r=>r.iso===dateFilter)))
   const shownEvents=events.filter(e=>(!dateFilter||e.iso===dateFilter)&&(!q||`${e.Event} ${e.Medias} ${e.Colorist}`.toLowerCase().includes(q)))
-  const summaryCSV=shownPeople.map(p=>({Name:p.Name,Position:p.Position,Section:p.Section,'Total Hours':p.Hours.toFixed(1),Events:p.Events,'Tasks Done':p.TasksDone,Tasks:p.Tasks}))
+  const summaryCSV=shownPeople.map(p=>({Name:p.Name,Position:p.Position,Section:p.Section,'1st Sem Hours':p.H1.toFixed(1),'2nd Sem Hours':p.H2.toFixed(1),'Total Hours':(p.H1+p.H2).toFixed(1),Events:p.Events,'Tasks Done':p.TasksDone,Tasks:p.Tasks}))
   const detailCSV=shownPeople.flatMap(p=>p.rows.filter(r=>!dateFilter||r.iso===dateFilter).map(r=>({Date:r.Date,'Event / Task':r.Event,Name:p.Name,Position:p.Position+(r.Duty?` (${r.Duty})`:''),'From → To':r.Range,'Hours / Status':r.Value})))
   const eventsCSV=shownEvents.map(e=>({'Event Date':e.Date,'Event Name':e.Event,Medias:e.Medias,Colorist:e.Colorist,Hours:e.Hours}))
   return <div>
-    <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{all?'Main spreadsheet backup':`${profile.department} backup`}</h1><p>Everyone is listed by name — tap a name to see all of their events and tasks.</p></div></section>
+    <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{all?'Main spreadsheet backup':`${profile.department} backup`}</h1><p>Everyone is listed by name — tap a name to see all of their events and tasks. The switch filters the lists; the box always shows both semesters.</p></div><SemSwitch value={sem} onChange={setSem}/></section>
+    <SemSummary h1={tot.h1} h2={tot.h2} unit={tot.unit} label={tot.unit==='hrs'?'Total hours':'Colorgrading done'}/>
     <div className="panel task-panel" style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:14,flexWrap:'wrap'}}>
       <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>The sheet pulls live data by itself (see the README, section 5) — this page only keeps the link.</p></div>
       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
@@ -1431,7 +1454,6 @@ function Backup({profile}){
       </div>
     </div>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Name, event or media…" extraActive={!!group} onClear={()=>setGroup('')}>
-      <SemesterSelect value={sem} onChange={setSem}/>
       {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
     </FilterBar>
     <div className="panel table-panel" style={{marginBottom:14}}>
@@ -1441,7 +1463,11 @@ function Backup({profile}){
           <button type="button" className="person-head" onClick={()=>setOpenId(open?null:p.id)}>
             <ChevronRight size={16} className="person-chev"/><strong>{p.Name}</strong>
             <span className="person-meta">{p.Position} • {p.Section}</span>
-            <span className="person-total">{p.Hours>0 && <>{p.Hours.toFixed(1)} <small>hrs</small></>}{p.Hours>0&&p.Tasks>0 && <small> · </small>}{p.Tasks>0 && <>{p.TasksDone} <small>tasks done</small></>}{!p.Hours&&!p.Tasks && <small>nothing yet</small>}</span>
+            <span className="person-split">
+              {(p.H1+p.H2)>0 && <><span className="mini-bar"><i style={{width:`${p.H1/(p.H1+p.H2)*100}%`,background:'#b2b6ae'}}/><i style={{width:`${p.H2/(p.H1+p.H2)*100}%`,background:'var(--sand)'}}/></span>
+                <span className="sp"><small>1st</small><b>{p.H1.toFixed(1)}</b></span><span className="sp"><small>2nd</small><b>{p.H2.toFixed(1)}</b></span><span className="sp"><small>total</small><b>{(p.H1+p.H2).toFixed(1)}</b></span></>}
+              {p.Tasks>0 && <span className="sp"><b>{p.TasksDone}</b><small>tasks done</small></span>}
+              {!(p.H1+p.H2)&&!p.Tasks && <small>nothing yet</small>}</span>
           </button>
           {open && <div className="person-body">
             {rows.length?<div className="person-rows">{rows.map((d,i)=><div className="person-row" key={i}><b>{d.Date}</b><span>{d.Event}{d.Duty && <em className="duty-tag">{d.Duty}</em>}</span><span>{d.Range}</span><span>{d.Value}</span></div>)}</div>:<div className="empty" style={{padding:'14px 0'}}>Nothing logged yet.</div>}
