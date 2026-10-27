@@ -423,3 +423,25 @@ select[multiple]{min-height:110px}
 /* Semester picker inside a panel header */
 .mini-filter{min-width:150px}
 .mini-filter .sel-btn{padding:7px 10px;font-size:11px}
+
+/* Semester switch + summary box */
+.sem-switch{margin:0;align-self:flex-end;flex-shrink:0}
+.sem-box{display:flex;align-items:center;gap:30px;padding:18px 24px;margin-bottom:14px;flex-wrap:wrap}
+.sem-box small{display:block;font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-dim);font-weight:700;margin-bottom:3px}
+.sem-big{font-family:"Playfair Display";font-size:38px;line-height:1.1;color:var(--text)}.sem-big span{font-family:"DM Sans";font-size:12px;color:var(--text-dim);margin-left:6px}
+.sem-part div{font-family:"Playfair Display";font-size:26px;color:var(--text)}
+.sem-divider{width:1px;align-self:stretch;background:var(--border)}
+.sem-split{margin-left:auto;min-width:220px;flex:0 1 320px}
+.sem-legend{display:flex;gap:14px;font-size:11px;color:var(--text-dim);margin-bottom:7px}
+.sem-legend span:before{content:"";display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.sem-legend .l1:before{background:#b2b6ae}.sem-legend .l2:before{background:var(--sand)}
+.sem-bar{display:flex;height:10px;border-radius:99px;overflow:hidden;background:var(--surface-2)}.sem-bar i{display:block;height:100%;transition:width .3s}
+.person-split{display:flex;align-items:center;gap:14px;margin-left:auto}
+.person-split .mini-bar{display:flex;width:120px;height:6px;border-radius:99px;overflow:hidden;background:var(--surface-2);flex-shrink:0}.person-split .mini-bar i{display:block;height:100%}
+.person-split .sp{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.person-split .sp small{font-size:10px;color:var(--text-dim);font-weight:500}.person-split .sp b{font-size:13px;color:var(--text)}
+@media(max-width:760px){
+  .hero{flex-wrap:wrap}.hero .sem-switch{align-self:flex-start}
+  .page-head{flex-wrap:wrap}.page-head .sem-switch{align-self:flex-start}
+  .sem-box{gap:18px;padding:16px}.sem-split{margin-left:0;flex-basis:100%}.sem-divider{display:none}
+  .person-split{margin-left:28px;flex-basis:100%;flex-wrap:wrap;gap:10px}.person-split .mini-bar{width:90px}
+}
