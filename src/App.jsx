@@ -1,4 +1,5 @@
 import { Children, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from './lib/supabase'
 import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
@@ -46,6 +47,13 @@ async function fetchActive(){ return (await fetchProfiles()).filter(p=>p.active!
 // Directory order: Admin, then EDBO (EIC, AEIC, TD, Finance, Art Director, Head Media, Head Layout, Head Researcher, Head Writer), then Media, then Colorist.
 function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p.position||'').trim().toLowerCase()); if(i>=0) return i; const f={eic:0,aeic:1,head_colorist:2,art_director:4,head_media:5}[p.role]; return f??50 }
 function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
+// Semester filter: 2nd semester is what everyone sees by default; 1st semester is the imported archive, kept for checking.
+const SEM_OPTIONS=[['2','2nd semester'],['1','1st semester']]
+const inSem=(x,sem)=>(x.semester??2)===Number(sem)
+function SemesterSelect({value,onChange}){ return <label>Semester<Select className="filter-select" value={value} onChange={e=>onChange(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label> }
+// Everyone who covered an event: linked crew first, then names carried over from the old sheet.
+function mediaNames(e){ return [...(e.schedule_members||[]).map(m=>crewText(m)).filter(Boolean),...(e.legacy_media?[e.legacy_media]:[])].join(', ') }
+function colorNames(e,tasks){ return [...(tasks||[]).filter(t=>t.schedule_id===e.id&&t.department==='Colorist').map(t=>t.profiles?.full_name).filter(Boolean),...(e.legacy_colorist?[e.legacy_colorist]:[])].join(', ') }
 // Video-only crew (VM / VC) do not have to sort photos.
 function needsSort(m){ const d=m.duties||[]; return !(d.length && d.every(x=>x==='VM'||x==='VC')) }
 function isHead(role){ return !!ROLE_META[role]?.head }
@@ -456,7 +464,7 @@ function Select({value,onChange,children,className='',disabled,style}){
     return ()=>{ document.removeEventListener('mousedown',close); document.removeEventListener('keydown',close); window.removeEventListener('resize',off); window.removeEventListener('scroll',off,true) } },[open])
   return <div className={`sel ${className.replace('filter-select','').trim()} ${open?'open':''}`} style={style}>
     <button type="button" ref={btn} className="sel-btn" disabled={disabled} onClick={toggle} aria-haspopup="listbox" aria-expanded={open}><span>{cur?.label}</span><ChevronDown size={15} className="sel-chev"/></button>
-    {open && pos && <div className="sel-list" role="listbox" style={pos}>{opts.map(o=><button type="button" role="option" aria-selected={o.value===value} key={String(o.value)} className={o.value===value?'on':''} onClick={()=>{ onChange({target:{value:o.value}}); setOpen(false) }}><span>{o.label}</span>{o.value===value && <Check size={13}/>}</button>)}</div>}
+    {open && pos && createPortal(<div className="sel-list" role="listbox" style={pos}>{opts.map(o=><button type="button" role="option" aria-selected={o.value===value} key={String(o.value)} className={o.value===value?'on':''} onClick={()=>{ onChange({target:{value:o.value}}); setOpen(false) }}><span>{o.label}</span>{o.value===value && <Check size={13}/>}</button>)}</div>,document.body)}
   </div>
 }
 function FilterBar({search,onSearch,date,onDate,children,onClear,extraActive,placeholder='Search…'}){
@@ -586,8 +594,9 @@ function AdminDashboard({profile}){
 function PostingTracker({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   const canPost=isAdminLike(profile.role)||profile.role==='art_director'
+  const [sem,setSem]=useState('2')
   async function load(){
-    const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(40)
+    const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,semester,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(300)
     const {data:tasks}=await supabase.from('tasks').select('schedule_id,department,status').not('schedule_id','is',null)
     const statusFor=(eventId,dept)=>{
       const ts=(tasks||[]).filter(x=>x.schedule_id===eventId && x.department===dept)
@@ -595,30 +604,30 @@ function PostingTracker({profile}){
       if(ts.every(t=>t.status==='completed')) return 'completed'
       return 'in progress'
     }
-    setRows((events||[]).map(e=>{
+    setRows((events||[]).filter(e=>inSem(e,sem)).map(e=>{
       const mem=(e.schedule_members||[]).filter(needsSort); const done=mem.filter(m=>m.sorted).length
       const isSorted=e.status==='completed'||e.status==='done'
       return { id:e.id, date:new Date(e.start_at), title:e.title,
         supposedPost:new Date(new Date(e.start_at).getTime()+6*864e5),
         sorted:isSorted?'sorted':(mem.length&&done>0?`${done}/${mem.length} sorted`:'not sorted'), isSorted, partial:!isSorted&&done>0,
         colorgrade:statusFor(e.id,'Colorist'), cover:statusFor(e.id,'Art Director'),
-        posted:!!e.posted_at, postedOn:e.posted_at?new Date(e.posted_at):null }
+        posted:!!e.posted_at, postedOn:e.posted_at?new Date(e.posted_at):null, archive:(e.semester??2)===1 }
     }))
     setLoading(false)
   }
-  useEffect(()=>{ load() },[]); usePoll(load)
+  useEffect(()=>{ load() },[sem]); usePoll(load)
   const markPosted=id=>supabase.rpc('mark_event_posted',{sid:id})
   const cls=v=>v==='completed'?'completed':v==='in progress'?'in_progress':'scheduled'
   return <div className="panel table-panel" style={{marginTop:14}}>
-    <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2></div>
+    <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2><div className="mini-filter"><Select value={sem} onChange={e=>setSem(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></div></div>
     <div>
       <div className="table-head posting-row"><span>Event Date</span><span>Event Name</span><span>Post By</span><span>Sorted</span><span>Colorgrade</span><span>FB Cover</span><span>Posted</span><span>Posted On</span></div>
       {loading ? <div className="empty">Loading…</div> : rows.map(r=><div className="table-row posting-row" key={r.id}>
         <span data-label="Event date">{fmtDay(r.date)}</span><strong className="row-title">{r.title}</strong><span data-label="Post by">{fmtDay(r.supposedPost)}</span>
         <span data-label="Sorted"><span className={`status ${r.isSorted?'completed':r.partial?'in_progress':'scheduled'}`}>{r.sorted}</span></span>
         <span data-label="Colorgrade"><span className={`status ${cls(r.colorgrade)}`}>{r.colorgrade}</span></span>
-        <span data-label="FB cover"><span className={`status ${cls(r.cover)}`}>{r.cover}</span></span>
-        <span data-label="Posted">{r.posted ? <span className="status completed">posted</span> : (canPost && (r.cover==='completed'||isAdminLike(profile.role)) ? <ActionButton label="Mark posted" doneLabel="Posted" run={()=>markPosted(r.id)} after={load}/> : <span className="status scheduled">not posted</span>)}</span>
+        <span data-label="FB cover">{r.archive?'—':<span className={`status ${cls(r.cover)}`}>{r.cover}</span>}</span>
+        <span data-label="Posted">{r.archive ? '—' : r.posted ? <span className="status completed">posted</span> : (canPost && (r.cover==='completed'||isAdminLike(profile.role)) ? <ActionButton label="Mark posted" doneLabel="Posted" run={()=>markPosted(r.id)} after={load}/> : <span className="status scheduled">not posted</span>)}</span>
         <span data-label="Posted on">{r.postedOn?fmtDay(r.postedOn):'—'}</span>
       </div>)}
       {!loading && !rows.length && <div className="empty">No media events yet.</div>}
@@ -759,7 +768,7 @@ function TaskTracker({profile}){
   const role=profile.role; const privileged=seesAll(role); const worker=isWorker(role)
   const canTask=isAdminLike(role)||isTD(role); const canEvent=isAdminLike(role)
   const [tasks,setTasks]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true)
-  const [deptFilter,setDeptFilter]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [search,setSearch]=useState('')
+  const [deptFilter,setDeptFilter]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [search,setSearch]=useState(''); const [sem,setSem]=useState('2')
   const [editTask,setEditTask]=useState(null); const [editEvent,setEditEvent]=useState(null)
   async function load(){
     let tq=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name,department)').eq('status','completed').order('completed_at',{ascending:false})
@@ -772,11 +781,12 @@ function TaskTracker({profile}){
   async function del(id){ if(!await confirmDialog({title:'Delete task?',body:'This removes the task for everyone. This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('tasks').delete().eq('id',id); load() }
   async function delEvent(id){ if(!await confirmDialog({title:'Delete event?',body:'This removes the event for everyone. This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('schedules').delete().eq('id',id); load() }
   const q=search.trim().toLowerCase()
-  const filteredTasks=tasks.filter(t=>(!deptFilter||t.department===deptFilter)&&(!dateFilter||t.assigned_date===dateFilter||(t.completed_at&&localISO(t.completed_at)===dateFilter))&&(!q||`${t.title} ${t.profiles?.full_name||''} ${t.department}`.toLowerCase().includes(q)))
-  const filteredEvents=events.filter(e=>(!deptFilter||deptFilter==='Media')&&(!dateFilter||localISO(e.start_at)===dateFilter||(e.sorted_at&&localISO(e.sorted_at)===dateFilter))&&(!q||`${e.title} ${(e.schedule_members||[]).map(m=>m.profiles?.full_name).join(' ')}`.toLowerCase().includes(q)))
+  const filteredTasks=tasks.filter(t=>inSem(t,sem)&&(!deptFilter||t.department===deptFilter)&&(!dateFilter||t.assigned_date===dateFilter||(t.completed_at&&localISO(t.completed_at)===dateFilter))&&(!q||`${t.title} ${t.profiles?.full_name||''} ${t.department}`.toLowerCase().includes(q)))
+  const filteredEvents=events.filter(e=>inSem(e,sem)&&(!deptFilter||deptFilter==='Media')&&(!dateFilter||localISO(e.start_at)===dateFilter||(e.sorted_at&&localISO(e.sorted_at)===dateFilter))&&(!q||`${e.title} ${mediaNames(e)} ${colorNames(e,tasks)}`.toLowerCase().includes(q)))
   return <div>
     <section className="page-head"><div><div className="eyebrow">COMPLETED WORK</div><h1>Tracker</h1><p>Everything finished, with who did it and when.</p></div></section>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event, task or person…" extraActive={!!deptFilter} onClear={()=>setDeptFilter('')}>
+      <SemesterSelect value={sem} onChange={setSem}/>
       {privileged && <label>Department<Select className="filter-select" value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}><option value="">All</option>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</Select></label>}
     </FilterBar>
     {privileged && <>
@@ -785,7 +795,7 @@ function TaskTracker({profile}){
         <div className={`table-head trk-events ${canEvent?'':'no-action'}`}><span>Event date</span><span>Event name</span><span>Medias</span><span>Sorted on</span><span>Status</span>{canEvent && <span>Action</span>}</div>
         {loading ? <div className="empty">Loading…</div> : filteredEvents.map(e=><div className={`table-row trk-events ${canEvent?'':'no-action'}`} key={e.id}>
           <span data-label="Event date">{fmtDay(e.start_at)}</span><strong className="row-title">{e.title}</strong>
-          <span data-label="Medias">{(e.schedule_members||[]).map(m=>crewText(m)).filter(Boolean).join(', ')||'—'}</span>
+          <span data-label="Medias">{mediaNames(e)||'—'}{colorNames(e,tasks) && <small className="sub">Colorist: {colorNames(e,tasks)}</small>}</span>
           <span data-label="Sorted on">{e.sorted_at?fmtDay(e.sorted_at):'—'}</span>
           <span data-label="Status"><span className={`status ${e.status}`}>{e.status==='completed'?'sorted':e.status}</span></span>
           {canEvent && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEditEvent(e)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>delEvent(e.id)}><Trash2 size={14}/></button></span>}
@@ -946,6 +956,8 @@ function CalendarPage({profile}){
           <span>Where: {e.raw.location||'No location'}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status==='completed'?'sorted':e.raw.status}{e.raw.sorted_at?` (${fmtDay(e.raw.sorted_at,false)})`:''}</span></>}
         {e.type==='task' && <><span>{e.raw.department} • Assigned to {e.raw.profiles?.full_name||'Unassigned'}</span>
           <span>Assigned {fmtDay(e.raw.assigned_date)}{e.raw.completed_at?` • Done ${fmtDay(e.raw.completed_at)}`:''}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status.replace('_',' ')}</span></>}
+        {e.type==='schedule' && e.raw.legacy_media && <span>Media: {e.raw.legacy_media}</span>}
+        {e.type==='schedule' && e.raw.legacy_colorist && <span>Colorist: {e.raw.legacy_colorist}</span>}
         {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id} className={`${m.sorted?'done':''} ${m.member_id===profile.id?'me':''}`}>{crewText(m)}{!needsSort(m)?'':m.sorted?' ✓ sorted':' • pending'}{m.member_id===profile.id?' (you)':''}</span>)}</div>}
         <div style={{marginTop:8,display:'flex',gap:8,flexWrap:'wrap'}}>
           {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted && needsSort(m)) && <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>}
@@ -1053,7 +1065,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
 /* ---------------- Tracker (Head Media / Media: sorted events ledger) ---------------- */
 function Tracker({profile}){
   const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null)
-  const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState('')
+  const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2')
   const can=canCreateSchedule(profile.role); const staff=isStaff(profile.role)
   async function load(){
     const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,sorted_at,duties,profiles(full_name))').eq('department','Media').in('status',['completed','done']).order('start_at',{ascending:false})
@@ -1064,16 +1076,16 @@ function Tracker({profile}){
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
   async function del(id){ if(!await confirmDialog({title:'Delete event?',body:'This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('schedules').delete().eq('id',id); load() }
   const q=search.trim().toLowerCase()
-  const shown=rows.filter(r=>(!dateFilter||localISO(r.start_at)===dateFilter||(r.sorted_at&&localISO(r.sorted_at)===dateFilter))&&(!q||`${r.title} ${(r.schedule_members||[]).map(m=>m.profiles?.full_name).join(' ')}`.toLowerCase().includes(q)))
+  const shown=rows.filter(r=>inSem(r,sem)&&(!dateFilter||localISO(r.start_at)===dateFilter||(r.sorted_at&&localISO(r.sorted_at)===dateFilter))&&(!q||`${r.title} ${mediaNames(r)}`.toLowerCase().includes(q)))
   return <div>
     <section className="page-head"><div><div className="eyebrow">FULL LEDGER</div><h1>Tracker</h1><p>Sorted events, who covered them, and when they were sorted.</p></div></section>
-    <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event or media…"/>
+    <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event or media…"><SemesterSelect value={sem} onChange={setSem}/></FilterBar>
     <div className="panel table-panel">
       <div className={`table-head trk-media ${can?'':'no-action'}`}><span>Event date</span><span>Event name</span><span>Medias</span><span>Sorted on</span><span>Status</span>{can && <span>Action</span>}</div>
       {shown.map(r=><div className={`table-row trk-media ${can?'':'no-action'}`} key={r.id}>
         <span data-label="Event date">{fmtDay(r.start_at)}<small className="sub">{fmtTime(r.start_at)}–{fmtTime(r.end_at)} · {Math.max(0,(new Date(r.end_at)-new Date(r.start_at))/3600000).toFixed(1)}h</small></span>
         <strong className="row-title">{r.title}</strong>
-        <span data-label="Medias">{(r.schedule_members||[]).map(m=>crewText(m)).filter(Boolean).join(', ')||'—'}</span>
+        <span data-label="Medias">{mediaNames(r)||'—'}</span>
         <span data-label="Sorted on">{r.sorted_at?fmtDay(r.sorted_at):'—'}</span>
         <span data-label="Status"><span className={`status ${r.status}`}>{r.status==='completed'?'sorted':r.status}</span></span>
         {can && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEdit(r)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(r.id)}><Trash2 size={14}/></button></span>}</div>)}
@@ -1375,15 +1387,16 @@ function Backup({profile}){
   const canSetLink=isAdminLike(role)||isHead(role)
   const showEvents=all||role==='head_media'
   const fixedGroup=all?'':(role==='head_media'?'Media':'Colorist')
-  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState('')
+  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2')
   const [sheetUrl,setSheetUrl]=useState(''); const [urlDraft,setUrlDraft]=useState(''); const [saved,setSaved]=useState(false)
   const [people,setPeople]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
   const scope=all?'ALL':profile.department
   async function load(){
     const {data:intg}=await supabase.from('integrations').select('*').eq('scope',scope).maybeSingle(); setSheetUrl(intg?.sheet_webhook_url||''); setUrlDraft(u=>u||intg?.sheet_webhook_url||'')
     const profiles=await fetchActive()
-    const {data:tasks}=await supabase.from('tasks').select('assigned_to,title,assigned_date,completed_at,status')
-    const {data:scheds}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
+    const {data:tasks0}=await supabase.from('tasks').select('id,assigned_to,title,assigned_date,completed_at,status,semester,department,schedule_id')
+    const {data:scheds0}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,semester,legacy_media,legacy_colorist,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
+    const tasks=(tasks0||[]).filter(t=>inSem(t,sem)); const scheds=(scheds0||[]).filter(s=>inSem(s,sem))
     const nameOf=id=>(profiles||[]).find(p=>p.id===id)?.full_name||''
     const hrsOf=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
     const list=(profiles||[]).filter(p=>ROLE_META[p.role]&&p.role!=='admin'&&(!fixedGroup||groupOf(p.role)===fixedGroup)&&(!fixedGroup||isStaff(p.role))).map(p=>{
@@ -1396,17 +1409,17 @@ function Backup({profile}){
       return { id:p.id, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
     }).sort((a,b)=>a.Name.localeCompare(b.Name))
     setPeople(list)
-    setEvents((scheds||[]).map(s=>({id:s.id,iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Medias:(s.schedule_members||[]).map(m=>`${nameOf(m.member_id)}${(m.duties||[]).length?` (${m.duties.join('/')})`:''}`).filter(Boolean).join(', '),Hours:hrsOf(s).toFixed(1)})))
+    setEvents((scheds||[]).map(s=>({id:s.id,iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Medias:[...(s.schedule_members||[]).map(m=>`${nameOf(m.member_id)}${(m.duties||[]).length?` (${m.duties.join('/')})`:''}`),...(s.legacy_media?[s.legacy_media]:[])].filter(Boolean).join(', '),Colorist:[...tasks.filter(t=>t.schedule_id===s.id&&t.department==='Colorist').map(t=>nameOf(t.assigned_to)),...(s.legacy_colorist?[s.legacy_colorist]:[])].filter(Boolean).join(', '),Hours:hrsOf(s).toFixed(1)})))
     setLoading(false)
   }
-  useEffect(()=>{ load() },[profile.id]); usePoll(load,60000)
+  useEffect(()=>{ load() },[profile.id,sem]); usePoll(load,60000)
   async function saveLink(){ const {error}=await supabase.from('integrations').upsert({scope,sheet_webhook_url:urlDraft,updated_by:profile.id,updated_at:new Date().toISOString()},{onConflict:'scope'}); if(error) notifyDialog(error.message); else { setSheetUrl(urlDraft); setSaved(true); setTimeout(()=>setSaved(false),2000) } }
   const q=search.trim().toLowerCase()
   const shownPeople=people.filter(p=>(!group||p.Section===group)&&(!q||`${p.Name} ${p.Position}`.toLowerCase().includes(q))&&(!dateFilter||p.rows.some(r=>r.iso===dateFilter)))
-  const shownEvents=events.filter(e=>(!dateFilter||e.iso===dateFilter)&&(!q||`${e.Event} ${e.Medias}`.toLowerCase().includes(q)))
+  const shownEvents=events.filter(e=>(!dateFilter||e.iso===dateFilter)&&(!q||`${e.Event} ${e.Medias} ${e.Colorist}`.toLowerCase().includes(q)))
   const summaryCSV=shownPeople.map(p=>({Name:p.Name,Position:p.Position,Section:p.Section,'Total Hours':p.Hours.toFixed(1),Events:p.Events,'Tasks Done':p.TasksDone,Tasks:p.Tasks}))
   const detailCSV=shownPeople.flatMap(p=>p.rows.filter(r=>!dateFilter||r.iso===dateFilter).map(r=>({Date:r.Date,'Event / Task':r.Event,Name:p.Name,Position:p.Position+(r.Duty?` (${r.Duty})`:''),'From → To':r.Range,'Hours / Status':r.Value})))
-  const eventsCSV=shownEvents.map(e=>({'Event Date':e.Date,'Event Name':e.Event,Medias:e.Medias,Hours:e.Hours}))
+  const eventsCSV=shownEvents.map(e=>({'Event Date':e.Date,'Event Name':e.Event,Medias:e.Medias,Colorist:e.Colorist,Hours:e.Hours}))
   return <div>
     <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{all?'Main spreadsheet backup':`${profile.department} backup`}</h1><p>Everyone is listed by name — tap a name to see all of their events and tasks.</p></div></section>
     <div className="panel task-panel" style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:14,flexWrap:'wrap'}}>
@@ -1418,6 +1431,7 @@ function Backup({profile}){
       </div>
     </div>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Name, event or media…" extraActive={!!group} onClear={()=>setGroup('')}>
+      <SemesterSelect value={sem} onChange={setSem}/>
       {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
     </FilterBar>
     <div className="panel table-panel" style={{marginBottom:14}}>
@@ -1438,7 +1452,7 @@ function Backup({profile}){
     {showEvents && <div className="panel table-panel">
       <div className="panel-title" style={{padding:'21px 21px 12px'}}><h2>Events</h2><div style={{display:'flex',alignItems:'center',gap:12}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{shownEvents.length} events</span><button className="text-btn" onClick={()=>downloadCSV('backup-events.csv',eventsCSV)}><Download size={13}/> Events CSV</button></div></div>
       <div className="table-head trk-bk"><span>Event date</span><span>Event name</span><span>Medias</span><span>Hours</span></div>
-      {shownEvents.map(e=><div className="table-row trk-bk" key={e.id}><span data-label="Event date">{e.Date}</span><strong className="row-title">{e.Event}</strong><span data-label="Medias">{e.Medias||'—'}</span><span data-label="Hours">{e.Hours} h</span></div>)}
+      {shownEvents.map(e=><div className="table-row trk-bk" key={e.id}><span data-label="Event date">{e.Date}</span><strong className="row-title">{e.Event}</strong><span data-label="Medias">{e.Medias||'—'}{e.Colorist && <small className="sub">Colorist: {e.Colorist}</small>}</span><span data-label="Hours">{e.Hours} h</span></div>)}
       {!loading && !shownEvents.length && <div className="empty">No events found.</div>}
     </div>}
   </div>
