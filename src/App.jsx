@@ -199,7 +199,9 @@ function InstallModal({onClose}){
     <p style={{color:'var(--text-dim)',fontSize:13,marginTop:-6}}>Add the app to your {ios||android?'home screen':'computer'} so it opens like a normal app, with its own icon and no browser bar.</p>
     {ios ? <ol className="install-steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>
     : android ? <ol className="install-steps"><li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Choose <b>Install app</b> (or <b>Add to Home screen</b>).</li></ol>
-    : <ol className="install-steps"><li><b>Chrome / Edge:</b> click the install icon at the right of the address bar, or open the menu and choose <b>Install Silang Memoirs</b>.</li><li><b>Brave:</b> open the menu (☰) → <b>Install Silang Memoirs</b> (or <b>Save and share → Install</b>).</li><li><b>Safari on Mac:</b> File → <b>Add to Dock</b>.</li></ol>}
+    : navigator.brave ? <ol className="install-steps"><li>Brave doesn't let websites open the install popup, so it has to be done from its own menu.</li><li>Click the <b>☰ menu</b> (top right) → <b>Save and share</b> → <b>Install Silang Memoirs</b>.</li></ol>
+    : /safari/i.test(ua)&&!/chrome|crios|edg/i.test(ua) ? <ol className="install-steps"><li>In the menu bar click <b>File → Add to Dock</b>.</li></ol>
+    : <ol className="install-steps"><li>Click the <b>install icon</b> at the right end of the address bar, or open the ⋮ menu → <b>Install Silang Memoirs</b>.</li></ol>}
     <div className="modal-actions"><button className="primary-btn" onClick={onClose}>Got it</button></div>
   </Modal>
 }
