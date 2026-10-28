@@ -186,13 +186,11 @@ function ThemeToggle({theme,onToggle,floating}){
 }
 
 /* ---------------- Install as an app ---------------- */
-let deferredInstall=null
-if(typeof window!=='undefined'){ window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredInstall=e; window.dispatchEvent(new Event('sm-install-ready')) }); window.addEventListener('appinstalled',()=>{ deferredInstall=null; window.dispatchEvent(new Event('sm-install-ready')) }) }
 function useInstall(){
   const [,tick]=useState(0)
   useEffect(()=>{ const f=()=>tick(n=>n+1); window.addEventListener('sm-install-ready',f); return ()=>window.removeEventListener('sm-install-ready',f) },[])
   const installed=typeof window!=='undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone===true)
-  async function prompt(){ if(!deferredInstall) return false; deferredInstall.prompt(); try{ await deferredInstall.userChoice }catch{} deferredInstall=null; tick(n=>n+1); return true }
+  async function prompt(){ const e=window.__installEvt; if(!e) return false; e.prompt(); try{ await e.userChoice }catch{} window.__installEvt=null; tick(n=>n+1); return true }
   return {installed, prompt}
 }
 function InstallModal({onClose}){
