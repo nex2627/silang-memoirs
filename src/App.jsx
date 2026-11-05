@@ -312,12 +312,13 @@ function PullRefresh(){
     window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:true}); window.addEventListener('touchend',end); window.addEventListener('touchcancel',end)
     return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
   },[busy])
-  if(pull<=0&&!busy) return null
+  if(busy) return <div className="ptr-full"><div className="loader-orbit"><img className="loader-logo" src={LOGO} alt=""/><span className="loader-dot"/></div></div>
+  if(pull<=0) return null
   return <div className={`ptr ${busy?'busy':''}`} style={{transform:`translate(-50%,${pull-56}px)`,opacity:Math.min(1,pull/50)}}><div className="ptr-orbit" style={busy?undefined:{transform:`rotate(${pull*4}deg)`}}><img src={LOGO} alt=""/></div></div>
 }
 
 function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
-  const [page,setPage]=useState(()=>{ try{ return localStorage.getItem('sm-page')||'Dashboard' }catch{ return 'Dashboard' } })
+  const [page,setPage]=useState(()=>{ const h=decodeURIComponent((window.location.hash||'').replace('#','')); if(h) return h; try{ return localStorage.getItem('sm-page')||'Dashboard' }catch{ return 'Dashboard' } })
   const [deptFocus,setDeptFocus]=useState(null) // admin drill-down into a department (Members page only)
   const [mobile,setMobile]=useState(false)
   const [collapsed,setCollapsed]=useState(()=>{ try{ return localStorage.getItem('sm-collapsed')==='1' }catch{ return false } })
@@ -335,14 +336,14 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   },[role])
 
   // Browser back button: step back through visited pages; stepping back past the first one logs out.
-  useEffect(()=>{ window.history.replaceState({page},'') },[])  // eslint-disable-line
+  useEffect(()=>{ window.history.replaceState({page},'','#'+page) },[])  // eslint-disable-line
   useEffect(()=>{ try{ localStorage.setItem('sm-page',page) }catch{} },[page])
   useEffect(()=>{ if(!nav.some(n=>n[0]===page)) setPage('Dashboard') },[nav,page])
   useEffect(()=>{
     function onPop(e){ const st=e.state; if(st && st.page){ setPage(st.page); setDeptFocus(null) } else { supabase.auth.signOut() } }
     window.addEventListener('popstate',onPop); return ()=>window.removeEventListener('popstate',onPop)
   },[])
-  function goPage(n){ setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'') }
+  function goPage(n){ setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
   function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
 
@@ -484,6 +485,7 @@ function PasswordModal({onClose}){
 /* ---------------- Stat + Modal shared ---------------- */
 function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong>{value}</strong><small>{note}</small></div> }
 function Modal({title,onClose,children}){
+  useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; return ()=>{ document.body.style.overflow=prev } },[])
   return <div className="modal-backdrop" onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
     <div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose}><X size={18}/></button></div>{children}</div>
   </div>
