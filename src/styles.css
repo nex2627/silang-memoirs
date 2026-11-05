@@ -479,8 +479,8 @@ body{overscroll-behavior-y:contain}
 /* ---- Round 3: slower, smoother motion; popup fixes; full-screen logo loader ---- */
 :root{--ease:cubic-bezier(.22,1,.36,1);--ease-soft:cubic-bezier(.45,.05,.25,1)}
 html,body{overscroll-behavior-y:none}
-.page-enter{animation:pageIn .75s var(--ease) both}
-.page-enter>*{animation:rise .85s var(--ease) both}
+.page-enter{animation:pageIn .75s var(--ease) backwards}
+.page-enter>*{animation:rise .85s var(--ease) backwards}
 .page-enter>*:nth-child(2){animation-delay:.09s}.page-enter>*:nth-child(3){animation-delay:.18s}.page-enter>*:nth-child(4){animation-delay:.27s}.page-enter>*:nth-child(5){animation-delay:.36s}.page-enter>*:nth-child(n+6){animation-delay:.45s}
 @keyframes pageIn{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:none}}
 @keyframes rise{from{opacity:0;transform:translateY(22px) scale(.985);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
@@ -496,7 +496,7 @@ button,.nav-item,.mobile-tab,.panel,.member-card,.icon-btn,.primary-btn,.act-btn
 @media (prefers-reduced-motion:reduce){.modal,.modal-backdrop,.ptr-full{animation:none!important}}
 
 /* Popup: no light edge from the blur, and a proper sheet on phones */
-.modal-backdrop{inset:-40px;padding:68px 60px;backdrop-filter:none;background:rgba(15,10,8,.62)}
+.modal-backdrop{inset:0;padding:28px 20px;backdrop-filter:none;background:rgba(15,10,8,.62);z-index:200}
 @media(max-width:760px){
   .modal-backdrop{inset:0;padding:0;align-items:flex-end;backdrop-filter:none}
   .modal{margin:0;width:100%;max-height:90dvh;overflow-y:auto;border-radius:20px 20px 0 0;padding:14px 16px 0;animation:sheetIn .75s var(--ease) both}
