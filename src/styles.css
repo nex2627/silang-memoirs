@@ -447,7 +447,7 @@ select[multiple]{min-height:110px}
 .person-split{display:flex;align-items:center;gap:14px;margin-left:auto}
 .person-split .sp{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.person-split .sp small{font-size:10px;color:var(--text-dim);font-weight:500}.person-split .sp b{font-size:13px;color:var(--text)}
 @media(max-width:760px){
-  .hero,.page-head{flex-wrap:nowrap;align-items:flex-end}.hero .sem-switch,.page-head .sem-switch{margin-left:auto}
+    .hero,.page-head{flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}.hero>div:first-child,.page-head>div:first-child{flex:1 1 0;min-width:0;text-align:left}.hero .sem-switch,.page-head .sem-switch{margin-left:auto}
   .sem-switch button{padding:5px 8px;font-size:10.5px}
   .install-top{display:grid}
   .sem-box{gap:18px;padding:16px}.sem-split{margin-left:0;flex-basis:100%}.sem-divider{display:none}
