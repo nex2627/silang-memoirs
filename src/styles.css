@@ -20,7 +20,7 @@ button{cursor:pointer} .app{min-height:100vh;display:flex}
 /* Sidebar */
 .sidebar{width:264px;background:var(--sidebar-bg);color:var(--sidebar-text);padding:22px 16px;display:flex;flex-direction:column;position:fixed;inset:0 auto 0 0;z-index:20;overflow:hidden;transition:width .22s ease,background .25s}
 .sidebar.collapsed{width:74px}
-/* Nothing is ever removed when collapsing â€” text just fades out, so every row keeps exactly the same position (no jumping). */
+/* Nothing is ever removed when collapsing — text just fades out, so every row keeps exactly the same position (no jumping). */
 .sb-text{white-space:nowrap;opacity:1;transition:opacity .15s ease}
 .sidebar.collapsed .sb-text{opacity:0;pointer-events:none}
 .nav-ic{flex-shrink:0}
@@ -475,3 +475,35 @@ body{overscroll-behavior-y:contain}
 .ptr-orbit{width:44px;height:44px;border-radius:50%;background:var(--sidebar-bg);display:grid;place-items:center;box-shadow:0 8px 22px rgba(0,0,0,.3);border:2px solid var(--sand)}
 .ptr-orbit img{width:28px;height:28px;object-fit:contain}
 .ptr.busy .ptr-orbit{animation:spin 1s linear infinite}
+
+/* ---- Round 3: slower, smoother motion; popup fixes; full-screen logo loader ---- */
+:root{--ease:cubic-bezier(.22,1,.36,1);--ease-soft:cubic-bezier(.45,.05,.25,1)}
+html,body{overscroll-behavior-y:none}
+.page-enter{animation:pageIn .75s var(--ease) both}
+.page-enter>*{animation:rise .85s var(--ease) both}
+.page-enter>*:nth-child(2){animation-delay:.09s}.page-enter>*:nth-child(3){animation-delay:.18s}.page-enter>*:nth-child(4){animation-delay:.27s}.page-enter>*:nth-child(5){animation-delay:.36s}.page-enter>*:nth-child(n+6){animation-delay:.45s}
+@keyframes pageIn{from{opacity:0;filter:blur(6px)}to{opacity:1;filter:none}}
+@keyframes rise{from{opacity:0;transform:translateY(22px) scale(.985);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes modalIn{from{opacity:0;transform:translateY(34px) scale(.96);filter:blur(5px)}to{opacity:1;transform:none;filter:none}}
+.modal{animation:modalIn .8s var(--ease) both}
+.modal-backdrop{animation:fade .6s var(--ease-soft) both}
+button,.nav-item,.mobile-tab,.panel,.member-card,.icon-btn,.primary-btn,.act-btn{transition-property:background,color,border-color,box-shadow,transform,opacity;transition-duration:.4s;transition-timing-function:var(--ease)}
+.sem-slider{transition:transform .6s var(--ease)}
+.sem-switch button{transition:color .4s var(--ease)}
+.sem-bar i{transition:width 1.5s var(--ease)}.sem-bar i:nth-child(2){transition-delay:.18s}
+.ptr-full{position:fixed;inset:0;z-index:100;background:var(--bg);display:grid;place-items:center;animation:fade .35s var(--ease-soft) both}
+@media (prefers-reduced-motion:reduce){.modal,.modal-backdrop,.ptr-full{animation:none!important}}
+
+/* Popup: no light edge from the blur, and a proper sheet on phones */
+.modal-backdrop{inset:-40px;padding:68px 60px;backdrop-filter:none;background:rgba(15,10,8,.62)}
+@media(max-width:760px){
+  .modal-backdrop{inset:0;padding:0;align-items:flex-end;backdrop-filter:none}
+  .modal{margin:0;width:100%;max-height:90dvh;overflow-y:auto;border-radius:20px 20px 0 0;padding:14px 16px 0;animation:sheetIn .75s var(--ease) both}
+  .modal-head{position:sticky;top:-14px;z-index:2;background:var(--surface);margin:-14px -16px 10px;padding:14px 16px 8px}
+  .modal h2{font-size:21px;margin:2px 0 0}
+  .modal label{margin-bottom:9px;gap:4px}
+  .modal textarea{min-height:52px}
+  .modal-actions{position:sticky;bottom:0;z-index:2;background:var(--surface);margin:8px -16px 0;padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--border)}
+}
+@keyframes sheetIn{from{transform:translateY(100%)}to{transform:none}}
