@@ -447,8 +447,20 @@ select[multiple]{min-height:110px}
 .person-split{display:flex;align-items:center;gap:14px;margin-left:auto}
 .person-split .sp{display:flex;align-items:baseline;gap:5px;white-space:nowrap}.person-split .sp small{font-size:10px;color:var(--text-dim);font-weight:500}.person-split .sp b{font-size:13px;color:var(--text)}
 @media(max-width:760px){
-    .hero,.page-head{flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}.hero>div:first-child,.page-head>div:first-child{flex:1 1 0;min-width:0;text-align:left}.hero .sem-switch,.page-head .sem-switch{margin-left:auto}
+  .hero,.page-head{flex-direction:row;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px}.hero>div:first-child,.page-head>div:first-child{flex:1 1 0;min-width:0;text-align:left}.hero .sem-switch,.page-head .sem-switch{margin-left:auto}
   .sem-switch button{padding:5px 8px;font-size:10.5px}
   .install-top{display:grid}
   .sem-box{gap:18px;padding:16px}.sem-split{margin-left:0;flex-basis:100%}.sem-divider{display:none}
   .person-split{margin-left:28px;flex-basis:100%;flex-wrap:wrap;gap:10px}}
+
+/* ---- Polish: no blue tap flash, smoother page change, bars that grow in ---- */
+*{-webkit-tap-highlight-color:transparent}
+button,a,.nav-item,.mobile-tab,.panel,.member-card{-webkit-touch-callout:none;touch-action:manipulation}
+button:focus:not(:focus-visible),a:focus:not(:focus-visible){outline:none}
+.page-enter{animation:pageIn .4s cubic-bezier(.2,.75,.25,1) both}
+.page-enter>*{animation:rise .5s cubic-bezier(.2,.75,.25,1) both}
+.page-enter>*:nth-child(2){animation-delay:.05s}.page-enter>*:nth-child(3){animation-delay:.1s}.page-enter>*:nth-child(4){animation-delay:.15s}.page-enter>*:nth-child(5){animation-delay:.2s}.page-enter>*:nth-child(n+6){animation-delay:.25s}
+.sem-bar i{transform-origin:left center;animation:bargrow .9s cubic-bezier(.2,.75,.25,1) both;transition:width .6s cubic-bezier(.2,.75,.25,1)}
+.sem-bar i:nth-child(2){animation-delay:.12s}
+@keyframes bargrow{from{transform:scaleX(0);opacity:.4}to{transform:scaleX(1);opacity:1}}
+@media (prefers-reduced-motion:reduce){.page-enter,.page-enter>*,.sem-bar i{animation:none!important}}
