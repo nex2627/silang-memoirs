@@ -60,13 +60,14 @@ function SemSwitch({value,onChange}){
 // One box that always shows both semesters: total, 1st, 2nd and the split bar.
 function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
   const t=h1+h2; const p1=t?h1/t*100:0; const f=n=>unit==='hrs'?n.toFixed(1):String(n)
+  const [go,setGo]=useState(false); useEffect(()=>{ const id=setTimeout(()=>setGo(true),80); return ()=>clearTimeout(id) },[])
   return <div className="panel sem-box">
     <div className="sem-main"><small>{label}</small><div className="sem-big">{f(t)}<span>{unit}</span></div></div>
     <div className="sem-divider"/>
     <div className="sem-part"><small>1st sem</small><div>{f(h1)}</div></div>
     <div className="sem-part"><small>2nd sem</small><div>{f(h2)}</div></div>
     <div className="sem-split"><div className="sem-legend"><span className="l1">1st sem</span><span className="l2">2nd sem</span></div>
-      <div className="sem-bar"><i style={{width:`${p1}%`,background:'#b2b6ae'}}/><i style={{width:`${100-p1}%`,background:'var(--sand)'}}/></div></div>
+      <div className="sem-bar"><i style={{width:`${go?p1:0}%`,background:'#b2b6ae'}}/><i style={{width:`${go?100-p1:0}%`,background:'var(--sand)'}}/></div></div>
   </div>
 }
 // Everyone who covered an event: linked crew first, then names carried over from the old sheet.
@@ -300,8 +301,23 @@ function Login({onLogin,theme,toggleTheme}){
 }
 
 /* ---------------- Workspace shell ---------------- */
+// Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
+function PullRefresh(){
+  const [pull,setPull]=useState(0); const [busy,setBusy]=useState(false); const st=useRef({y:0,on:false,v:0})
+  useEffect(()=>{
+    const MAX=110, GO=72
+    const start=e=>{ if(window.innerWidth>760||busy) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0} }
+    const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; setPull(0); return } s.v=Math.min(MAX,dy*.5); setPull(s.v) }
+    const end=()=>{ const s=st.current; if(!s.on) return; s.on=false; if(s.v>=GO){ setBusy(true); setPull(GO); setTimeout(()=>window.location.reload(),650) } else setPull(0) }
+    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:true}); window.addEventListener('touchend',end); window.addEventListener('touchcancel',end)
+    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
+  },[busy])
+  if(pull<=0&&!busy) return null
+  return <div className={`ptr ${busy?'busy':''}`} style={{transform:`translate(-50%,${pull-56}px)`,opacity:Math.min(1,pull/50)}}><div className="ptr-orbit" style={busy?undefined:{transform:`rotate(${pull*4}deg)`}}><img src={LOGO} alt=""/></div></div>
+}
+
 function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
-  const [page,setPage]=useState('Dashboard')
+  const [page,setPage]=useState(()=>{ try{ return localStorage.getItem('sm-page')||'Dashboard' }catch{ return 'Dashboard' } })
   const [deptFocus,setDeptFocus]=useState(null) // admin drill-down into a department (Members page only)
   const [mobile,setMobile]=useState(false)
   const [collapsed,setCollapsed]=useState(()=>{ try{ return localStorage.getItem('sm-collapsed')==='1' }catch{ return false } })
@@ -319,7 +335,9 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   },[role])
 
   // Browser back button: step back through visited pages; stepping back past the first one logs out.
-  useEffect(()=>{ window.history.replaceState({page:'Dashboard'},'') },[])
+  useEffect(()=>{ window.history.replaceState({page},'') },[])  // eslint-disable-line
+  useEffect(()=>{ try{ localStorage.setItem('sm-page',page) }catch{} },[page])
+  useEffect(()=>{ if(!nav.some(n=>n[0]===page)) setPage('Dashboard') },[nav,page])
   useEffect(()=>{
     function onPop(e){ const st=e.state; if(st && st.page){ setPage(st.page); setDeptFocus(null) } else { supabase.auth.signOut() } }
     window.addEventListener('popstate',onPop); return ()=>window.removeEventListener('popstate',onPop)
@@ -379,6 +397,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
         {page==='Backup' && <Backup profile={profile}/>}
       </div>
     </main>
+    <PullRefresh/>
     <nav className="mobile-tabbar">{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
     {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
