@@ -486,9 +486,10 @@ function PasswordModal({onClose}){
 function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong>{value}</strong><small>{note}</small></div> }
 function Modal({title,onClose,children}){
   useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; return ()=>{ document.body.style.overflow=prev } },[])
-  return <div className="modal-backdrop" onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
+  // Rendered on <body> so the page's animations can never trap or shrink the overlay.
+  return createPortal(<div className="modal-backdrop" onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
     <div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose}><X size={18}/></button></div>{children}</div>
-  </div>
+  </div>,document.body)
 }
 
 // Token-style person picker. multi=true toggles membership on click; multi=false makes each click replace the selection.
