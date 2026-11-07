@@ -5,7 +5,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
   ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
-  Download, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
+  Download, Copy, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 
 } from 'lucide-react'
 
@@ -178,11 +178,11 @@ function downloadCSV(filename,rows){ if(!rows.length){ notifyDialog('Nothing to 
 function useTheme(){
   const [theme,setTheme]=useState(()=>{ try{return localStorage.getItem('sm-theme')||'light'}catch{return 'light'} })
   useEffect(()=>{ document.documentElement.setAttribute('data-theme',theme); try{localStorage.setItem('sm-theme',theme)}catch{} },[theme])
-  return [theme, ()=>setTheme(t=>t==='light'?'dark':'light')]
+  return [theme, ()=>{ const r=document.documentElement; r.classList.add('theme-switching'); clearTimeout(window.__themeT); window.__themeT=setTimeout(()=>r.classList.remove('theme-switching'),900); setTheme(t=>t==='light'?'dark':'light') }]
 }
 function ThemeToggle({theme,onToggle,floating}){
   return <button className={floating?'theme-toggle-floating':'theme-toggle'} onClick={onToggle} title="Toggle theme">
-    {theme==='light'?<Moon size={floating?18:15}/>:<Sun size={floating?18:15}/>}
+    <span key={theme} className="theme-ico">{theme==='light'?<Moon size={floating?18:15}/>:<Sun size={floating?18:15}/>}</span>
   </button>
 }
 
@@ -303,18 +303,21 @@ function Login({onLogin,theme,toggleTheme}){
 /* ---------------- Workspace shell ---------------- */
 // Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
 function PullRefresh(){
-  const [pull,setPull]=useState(0); const [busy,setBusy]=useState(false); const st=useRef({y:0,on:false,v:0})
+  const [busy,setBusy]=useState(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
   useEffect(()=>{
-    const MAX=110, GO=72
-    const start=e=>{ if(window.innerWidth>760||busy) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0} }
-    const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; setPull(0); return } s.v=Math.min(MAX,dy*.5); setPull(s.v) }
-    const end=()=>{ const s=st.current; if(!s.on) return; s.on=false; if(s.v>=GO){ setBusy(true); setPull(GO); setTimeout(()=>window.location.reload(),650) } else setPull(0) }
+    const MAX=120, GO=78
+    const node=()=>el.current
+    const paint=(v,smooth)=>{ const n=node(); if(!n) return; n.style.transition=smooth?'transform .5s cubic-bezier(.22,1,.36,1),opacity .4s':'none'; n.style.transform=`translate(-50%,${v-60}px)`; n.style.opacity=Math.min(1,v/46); const o=n.firstChild; if(o) o.style.transform=`rotate(${v*3.2}deg) scale(${.72+Math.min(1,v/GO)*.28})` }
+    const start=e=>{ if(window.innerWidth>760||busy) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0,armed:false} }
+    const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; paint(0,false); return }
+      s.v=MAX*Math.tanh(dy/190); paint(s.v,false); const arm=s.v>=GO; if(arm!==s.armed){ s.armed=arm; node()?.classList.toggle('armed',arm) } }
+    const end=()=>{ const s=st.current; if(!s.on) return; s.on=false
+      if(s.v>=GO){ paint(GO,true); setTimeout(()=>setBusy(true),120); setTimeout(()=>window.location.reload(),900) } else paint(0,true) }
     window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:true}); window.addEventListener('touchend',end); window.addEventListener('touchcancel',end)
     return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
   },[busy])
   if(busy) return <div className="ptr-full"><div className="loader-orbit"><img className="loader-logo" src={LOGO} alt=""/><span className="loader-dot"/></div></div>
-  if(pull<=0) return null
-  return <div className={`ptr ${busy?'busy':''}`} style={{transform:`translate(-50%,${pull-56}px)`,opacity:Math.min(1,pull/50)}}><div className="ptr-orbit" style={busy?undefined:{transform:`rotate(${pull*4}deg)`}}><img src={LOGO} alt=""/></div></div>
+  return <div className="ptr" ref={el} style={{opacity:0,transform:'translate(-50%,-60px)'}}><div className="ptr-orbit"><img src={LOGO} alt=""/></div></div>
 }
 
 function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
@@ -325,6 +328,13 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   const [pwOpen,setPwOpen]=useState(false); const [installOpen,setInstallOpen]=useState(false); const install=useInstall()
   async function installApp(){ if(!(await install.prompt())) setInstallOpen(true) }
   const role=profile.role; const mode=roleMode(role)
+  // Text is protected from copying; only an admin can switch copying on, and it resets on every reload.
+  const [allowCopy,setAllowCopy]=useState(false); const canCopy=role==='admin'&&allowCopy
+  useEffect(()=>{ document.documentElement.classList.toggle('allow-copy',canCopy); if(canCopy) return
+    const inField=t=>t&&t.closest&&t.closest('input,textarea,[contenteditable=true]')
+    const block=e=>{ if(!inField(e.target)) e.preventDefault() }
+    const evs=['copy','cut','contextmenu','selectstart','dragstart']; evs.forEach(n=>document.addEventListener(n,block))
+    return ()=>evs.forEach(n=>document.removeEventListener(n,block)) },[canCopy])
   const adminLike=isAdminLike(role); const viewAll=seesAll(role)
 
   const nav=useMemo(()=>{
@@ -399,6 +409,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
       </div>
     </main>
     <PullRefresh/>
+    {role==='admin' && <button type="button" className={`copy-toggle ${canCopy?'on':''}`} onClick={()=>setAllowCopy(v=>!v)} title="Allow copying text (admin only, resets on reload)"><Copy size={12}/> {canCopy?'Copy on':'Copy off'}</button>}
     <nav className="mobile-tabbar">{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
     {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
@@ -408,9 +419,9 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
 
 /* ---------------- Notifications ---------------- */
 function NotificationBell({profile}){
-  const [open,setOpen]=useState(false); const [rows,setRows]=useState([]); const wrap=useRef(null)
+  const [open,setOpen]=useState(false); const [rows,setRows]=useState([]); const wrap=useRef(null); const drop=useRef(null)
   // Clicking anywhere else (or pressing Esc) closes the notification box.
-  useEffect(()=>{ if(!open) return; const away=e=>{ if(wrap.current && !wrap.current.contains(e.target)) setOpen(false) }; const esc=e=>{ if(e.key==='Escape') setOpen(false) }
+  useEffect(()=>{ if(!open) return; const away=e=>{ if(wrap.current && !wrap.current.contains(e.target) && !(drop.current && drop.current.contains(e.target))) setOpen(false) }; const esc=e=>{ if(e.key==='Escape') setOpen(false) }
     document.addEventListener('mousedown',away); document.addEventListener('touchstart',away); document.addEventListener('keydown',esc)
     return ()=>{ document.removeEventListener('mousedown',away); document.removeEventListener('touchstart',away); document.removeEventListener('keydown',esc) } },[open])
   useEffect(()=>{ load(); const t=setInterval(load,45000); return ()=>clearInterval(t) },[profile.id])
@@ -418,14 +429,14 @@ function NotificationBell({profile}){
   async function markRead(id){ setRows(r=>r.filter(x=>x.id!==id)); await supabase.from('notifications').update({read:true}).eq('id',id) }
   async function markAllRead(){ const ids=rows.map(r=>r.id); if(!ids.length) return; setRows([]); await supabase.from('notifications').update({read:true}).in('id',ids) }
   return <div className="notif-wrap" ref={wrap}>
-    <button className="icon-btn" onClick={()=>setOpen(o=>!o)}><Bell size={16}/>{rows.length>0 && <span className="notif-dot">{rows.length>9?'9+':rows.length}</span>}</button>
-    {open && <div className="notif-dropdown">
+    <button className={`icon-btn ${rows.length>0?'bell-ring':''}`} onClick={()=>setOpen(o=>!o)}><Bell size={16}/>{rows.length>0 && <span className="notif-dot">{rows.length>9?'9+':rows.length}</span>}</button>
+    {open && createPortal(<div className="notif-dropdown" ref={drop}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 6px 10px'}}><strong style={{fontSize:12}}>Notifications</strong>{rows.length>0 && <button className="text-btn" onClick={markAllRead}>Mark all read</button>}</div>
       {!rows.length && <div className="notif-empty"><BellOff size={20}/><span>You're all caught up.</span></div>}
       {rows.map(r=><button key={r.id} className="notif-item unread" onClick={()=>markRead(r.id)}>
         <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
       </button>)}
-    </div>}
+    </div>,document.body)}
   </div>
 }
 
@@ -485,10 +496,23 @@ function PasswordModal({onClose}){
 /* ---------------- Stat + Modal shared ---------------- */
 function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong>{value}</strong><small>{note}</small></div> }
 function Modal({title,onClose,children}){
+  const [closing,setClosing]=useState(false); const box=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
   useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; return ()=>{ document.body.style.overflow=prev } },[])
+  function close(){ if(done.current) return; done.current=true; setClosing(true); setTimeout(onClose,420) }
+  // Phone: pull the sheet down to close it (same as the X). Springs back if you let go early.
+  useEffect(()=>{
+    const el=box.current; if(!el) return
+    const start=e=>{ if(window.innerWidth>760||done.current) return; if(el.scrollTop>0 && !e.target.closest('.modal-head')) return; drag.current={y:e.touches[0].clientY,on:true,dy:0}; el.style.animation='none'; el.style.transition='none' }
+    const move=e=>{ const d=drag.current; if(!d.on) return; const dy=e.touches[0].clientY-d.y; if(dy<=0){ d.dy=0; el.style.transform=''; return } d.dy=dy; el.style.transform=`translateY(${dy*.92}px)`; if(e.cancelable) e.preventDefault() }
+    const end=()=>{ const d=drag.current; if(!d.on) return; d.on=false
+      if(d.dy>110){ done.current=true; el.style.transition='transform .42s cubic-bezier(.22,1,.36,1)'; el.style.transform='translateY(110%)'; setClosing('drag'); setTimeout(onClose,400) }
+      else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1)'; el.style.transform='' } }
+    el.addEventListener('touchstart',start,{passive:true}); el.addEventListener('touchmove',move,{passive:false}); el.addEventListener('touchend',end); el.addEventListener('touchcancel',end)
+    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchmove',move); el.removeEventListener('touchend',end); el.removeEventListener('touchcancel',end) }
+  },[])  // eslint-disable-line
   // Rendered on <body> so the page's animations can never trap or shrink the overlay.
-  return createPortal(<div className="modal-backdrop" onClick={e=>{ if(e.target===e.currentTarget) onClose() }}>
-    <div className="modal"><div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose}><X size={18}/></button></div>{children}</div>
+  return createPortal(<div className={`modal-backdrop ${closing?'closing':''}`} onClick={e=>{ if(e.target===e.currentTarget) close() }}>
+    <div className={`modal ${closing===true?'closing':''}`} ref={box}><div className="modal-head"><h2>{title}</h2><button type="button" className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div>
   </div>,document.body)
 }
 
@@ -512,7 +536,7 @@ function PersonPicker({groups,value,multi,onChange,emptyLabel='No one available 
 function WelcomeHero({profile,children,onCreate,createLabel,aside}){
   return <section className="hero">
     <div><div className="eyebrow"><Sparkles size={14}/> {seesAll(profile.role)?'COMMAND CENTER':(roleDept(profile.role)||'').toUpperCase()+' DESK'}</div>
-    <h1>{greet()}, {profile.full_name.split(' ')[0]}.</h1><p>{WELCOME_LINE}</p></div>
+    <h1><span className="greet-sub">{greet()},</span> <span className="greet-name">{profile.full_name.split(' ')[0]}.</span></h1><p>{WELCOME_LINE}</p></div>
     {aside}
     {onCreate && <button className="primary-btn" onClick={onCreate}><Plus size={17}/> {createLabel}</button>}
   </section>
@@ -688,7 +712,7 @@ function PostingTracker({profile,sem:semIn}){
     <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2>{semIn===undefined && <div className="mini-filter"><Select value={sem} onChange={e=>setSem(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></div>}</div>
     <div>
       <div className="table-head posting-row"><span>Event Date</span><span>Event Name</span><span>Post By</span><span>Sorted</span><span>Colorgrade</span><span>FB Cover</span><span>Posted</span><span>Posted On</span></div>
-      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div className="table-row posting-row" key={r.id}>
+      {loading ? null : rows.map(r=><div className="table-row posting-row" key={r.id}>
         <span data-label="Event date">{fmtDay(r.date)}</span><strong className="row-title">{r.title}</strong><span data-label="Post by">{fmtDay(r.supposedPost)}</span>
         <span data-label="Sorted"><span className={`status ${r.isSorted?'completed':r.partial?'in_progress':'scheduled'}`}>{r.sorted}</span></span>
         <span data-label="Colorgrade"><span className={`status ${cls(r.colorgrade)}`}>{r.colorgrade}</span></span>
