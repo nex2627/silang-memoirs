@@ -507,3 +507,44 @@ button,.nav-item,.mobile-tab,.panel,.member-card,.icon-btn,.primary-btn,.act-btn
   .modal-actions{position:sticky;bottom:0;z-index:2;background:var(--surface);margin:8px -16px 0;padding:10px 16px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--border)}
 }
 @keyframes sheetIn{from{transform:translateY(100%)}to{transform:none}}
+
+/* ---- Round 4 ---- */
+html{overflow-x:clip}
+/* text can't be selected/copied (admin can switch it on) */
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,[contenteditable=true]{-webkit-user-select:text;user-select:text}
+html.allow-copy body,html.allow-copy body *{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important}
+.copy-toggle{position:fixed;right:14px;bottom:14px;z-index:35;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);font-size:10px;font-weight:700;border-radius:999px;padding:6px 11px;box-shadow:var(--shadow);opacity:.75}
+.copy-toggle.on{background:var(--sand);color:#261e1a;border-color:var(--sand);opacity:1}
+/* notifications: opens on top of everything, never wider than the screen */
+.notif-dropdown{position:fixed;top:64px;right:34px;left:auto;width:340px;max-width:calc(100vw - 24px);max-height:min(70dvh,460px);z-index:150;animation:dropIn .5s var(--ease) both;transform-origin:top right}
+@keyframes dropIn{from{opacity:0;transform:translateY(-10px) scale(.96)}to{opacity:1;transform:none}}
+.bell-ring svg{transform-origin:50% 10%;animation:bellshake 3.2s ease-in-out infinite}
+@keyframes bellshake{0%,40%,100%{transform:rotate(0)}4%{transform:rotate(16deg)}8%{transform:rotate(-14deg)}12%{transform:rotate(11deg)}16%{transform:rotate(-9deg)}20%{transform:rotate(6deg)}24%{transform:rotate(-3deg)}28%{transform:rotate(0)}}
+/* theme button + smooth colour change */
+.theme-ico{display:grid;place-items:center;animation:themeIco .7s var(--ease) both}
+@keyframes themeIco{from{opacity:0;transform:rotate(-110deg) scale(.4)}to{opacity:1;transform:none}}
+.theme-toggle:active,.theme-toggle-floating:active{transform:scale(.9)}
+.theme-switching *,.theme-switching *::before,.theme-switching *::after{transition:background-color .65s var(--ease-soft),color .65s var(--ease-soft),border-color .65s var(--ease-soft),fill .65s var(--ease-soft),stroke .65s var(--ease-soft),box-shadow .65s var(--ease-soft)!important}
+/* popup closing */
+.modal-backdrop.closing{animation:fadeOut .45s var(--ease-soft) both}
+.modal.closing{animation:modalOut .45s var(--ease) both}
+@keyframes fadeOut{from{opacity:1}to{opacity:0}}
+@keyframes modalOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(24px) scale(.97)}}
+/* pull to refresh */
+.ptr{will-change:transform,opacity}
+.ptr-orbit{will-change:transform}
+.ptr.armed .ptr-orbit{box-shadow:0 0 0 5px rgba(208,169,126,.28),0 8px 22px rgba(0,0,0,.3)}
+.ptr-orbit{transition:box-shadow .3s}
+.ptr.busy .ptr-orbit{animation:none}
+@media(max-width:760px){
+  .copy-toggle{bottom:76px;right:10px}
+  .notif-dropdown{left:12px;right:12px;width:auto;top:62px;max-width:none}
+  .modal.closing{animation:sheetOut .5s var(--ease) both}
+  .modal::before{content:"";display:block;width:42px;height:4px;border-radius:99px;background:var(--border);margin:0 auto 8px}
+  .hero h1{line-height:1.05}
+  .greet-sub{display:block;font:700 11px/1 Poppins,system-ui,sans-serif;letter-spacing:.26em;color:var(--sand);margin-bottom:8px}
+  .greet-name{display:block;font-size:clamp(30px,10vw,40px);overflow-wrap:anywhere;letter-spacing:-.5px}
+  .hero p{font-size:12.5px;max-width:34ch}
+}
+@keyframes sheetOut{from{transform:none}to{transform:translateY(100%)}}
