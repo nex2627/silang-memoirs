@@ -3,24 +3,29 @@ import { createClient } from '@supabase/supabase-js'
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
-function pickStorage(){
-  try{
-    const ls=window.localStorage, ss=window.sessionStorage
-    let id=ss.getItem('sm-tab-id'); if(!id){ id=Math.random().toString(36).slice(2); ss.setItem('sm-tab-id',id) }
-    const beat=()=>{ try{ return JSON.parse(ls.getItem('sm-main-tab')||'null') }catch{ return null } }
-    const fresh=b=>b && Date.now()-b.t<7000
-    let mode=ss.getItem('sm-tab-mode'); const b=beat()
-    if(mode==='main'){ if(fresh(b) && b.id!==id) mode='own' }
-    else if(mode!=='own'){ mode = fresh(b) && b.id!==id ? 'own' : 'main' }
-    ss.setItem('sm-tab-mode',mode)
-    if(mode==='main'){
-      const stamp=()=>ls.setItem('sm-main-tab',JSON.stringify({id,t:Date.now()}))
-      stamp(); setInterval(stamp,3000)
-      window.addEventListener('pagehide',()=>{ const x=beat(); if(x&&x.id===id) ls.removeItem('sm-main-tab') })
-      return ls
+function makeStorage(){
+  let ls, ss
+  try{ ls=window.localStorage; ss=window.sessionStorage }catch{ return undefined }
+  const me=Math.random().toString(36).slice(2)
+  let mode=null
+  let ch=null; try{ ch=new BroadcastChannel('sm-tabs') }catch{}
+  const ready=new Promise(resolve=>{
+    const finish=m=>{ if(mode) return; mode=m; try{ ss.setItem('sm-tab-mode',m) }catch{} resolve() }
+    if(ss.getItem('sm-tab-mode')==='own'){ mode='own'; resolve() }
+    if(!ch){ finish('main'); return }
+    ch.onmessage=ev=>{
+      const d=ev.data||{}
+      if(d.t==='whois' && mode==='main') ch.postMessage({t:'main',id:me,to:d.from})
+      else if(d.t==='main' && d.to===me && d.id!==me) finish('own')
     }
-    return ss
-  }catch{ return undefined }
+    if(!mode){ ch.postMessage({t:'whois',from:me}); setTimeout(()=>finish('main'),350) }
+  })
+  const box=()=>mode==='own'?ss:ls
+  return {
+    getItem:async k=>{ await ready; return box().getItem(k) },
+    setItem:async(k,v)=>{ await ready; box().setItem(k,v) },
+    removeItem:async k=>{ await ready; box().removeItem(k) }
+  }
 }
 
-export const supabase = url && key ? createClient(url, key, { auth:{ storage:pickStorage(), persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null
+export const supabase = url && key ? createClient(url, key, { auth:{ storage:makeStorage(), persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null
