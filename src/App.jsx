@@ -379,7 +379,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar')) return true
       for(let n=t;n&&n!==document.body;n=n.parentElement){ if(n.scrollWidth>n.clientWidth+4){ const ox=getComputedStyle(n).overflowX; if(ox==='auto'||ox==='scroll') return true } } return false }
     const idx=()=>{ const {nav,page}=swipe.current; return nav.findIndex(n=>n[0]===page) }
-    const start=e=>{ ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); mode=null; x0=e.touches[0].clientX; y0=e.touches[0].clientY; el=document.querySelector('.content') }
+    const start=e=>{ if(el){ el.style.transform=''; el.style.opacity=''; el.style.transition=''; el.style.willChange='' } ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); mode=null; x0=e.touches[0].clientX; y0=e.touches[0].clientY; el=document.querySelector('.content') }
     const move=e=>{ if(!ok||!el) return; const dx=e.touches[0].clientX-x0, dy=e.touches[0].clientY-y0
       if(!mode){ if(Math.abs(dx)<10&&Math.abs(dy)<10) return; mode=Math.abs(dx)>Math.abs(dy)*1.3?'h':'v'; if(mode==='h'){ el.style.animation='none'; el.style.transition='none'; el.style.willChange='transform,opacity' } }
       if(mode!=='h') return
@@ -392,7 +392,10 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',end,{passive:true}); window.addEventListener('touchcancel',end,{passive:true})
     return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
   },[])
-  useEffect(()=>{ document.querySelector('.mobile-tab.active')?.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}) },[page])
+  // keep the active tab centred in the bottom bar — scrolls only the bar itself, never the page
+  useEffect(()=>{ const bar=tabRef.current; const a=bar&&bar.querySelector('.mobile-tab.active'); if(!bar||!a) return
+    const t=setTimeout(()=>{ bar.scrollTo({left:Math.max(0,a.offsetLeft-(bar.clientWidth-a.offsetWidth)/2),behavior:'smooth'}) },140); return ()=>clearTimeout(t) },[page])
+  useEffect(()=>{ const fix=()=>{ if(window.scrollX) window.scrollTo(0,window.scrollY) }; window.addEventListener('scroll',fix,{passive:true}); return ()=>window.removeEventListener('scroll',fix) },[])
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
   function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
 
