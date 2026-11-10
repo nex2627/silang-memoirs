@@ -571,3 +571,37 @@ html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
   .hero .sem-switch{margin-left:0;align-self:center}
   .hero .primary-btn{margin-left:auto}
 }
+
+/* ---- Round 6: flowing motion, login/logout, count-up, control center ---- */
+.count{font-variant-numeric:tabular-nums}
+.stat-card strong,.sem-big,.sem-part div{font-variant-numeric:tabular-nums}
+.login-bg{animation:fade .9s var(--ease-soft) both}
+.login-card{animation:cardIn 1s var(--ease) both}
+@keyframes cardIn{from{opacity:0;transform:translateY(30px) scale(.97);filter:blur(6px)}to{opacity:1;transform:none;filter:none}}
+.app{animation:appIn 1s var(--ease) both}
+@keyframes appIn{from{opacity:0;transform:scale(.985);filter:blur(5px)}to{opacity:1;transform:none;filter:none}}
+html.app-leaving .app{animation:appOut .55s var(--ease-soft) both;pointer-events:none}
+@keyframes appOut{from{opacity:1;transform:none;filter:none}to{opacity:0;transform:scale(.985) translateY(8px);filter:blur(6px)}}
+.loader-screen{animation:fade .6s var(--ease-soft) both}
+/* rows and cards flow in one after another as data arrives */
+.task-row,.table-row,.person-row,.member-card,.stat-card,.schedule-card,.panel{animation:rowIn .7s var(--ease) backwards}
+.task-row:nth-child(2),.table-row:nth-child(2),.member-card:nth-child(2),.stat-card:nth-child(2){animation-delay:.06s}
+.task-row:nth-child(3),.table-row:nth-child(3),.member-card:nth-child(3),.stat-card:nth-child(3){animation-delay:.12s}
+.task-row:nth-child(4),.table-row:nth-child(4),.member-card:nth-child(4),.stat-card:nth-child(4){animation-delay:.18s}
+.task-row:nth-child(n+5),.table-row:nth-child(n+5),.member-card:nth-child(n+5),.stat-card:nth-child(n+5){animation-delay:.24s}
+@keyframes rowIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.control-center{margin-bottom:14px}
+.cc-note{margin:-4px 0 14px;font-size:12px;color:var(--text-dim);line-height:1.5}
+.cc-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 0;border-top:1px solid var(--border)}
+.cc-row strong{display:block;font-size:13px}.cc-row span{font-size:11px;color:var(--text-dim)}
+.cc-row .sem-switch{align-self:center}
+@media(max-width:760px){.cc-row{flex-direction:column;align-items:flex-start}.cc-row .sem-switch{align-self:stretch}.cc-row .sem-switch button{padding:7px 6px}}
+@media (prefers-reduced-motion:reduce){.app,.login-card,.login-bg,.task-row,.table-row,.member-card,.stat-card,.panel{animation:none!important}}
+@media(max-width:760px){
+  .page-head:has(>.primary-btn)>div:first-child,.page-head:has(>.action-group)>div:first-child{flex:1 1 100%}
+  .page-head>.primary-btn,.page-head>.ghost-btn{margin-left:0}
+  .panel-title{flex-wrap:wrap;row-gap:8px}
+  .panel-title>*{min-width:0}
+  .filter-bar input,.filter-bar .sel,.filter-bar label{max-width:100%}
+}
+.sem-big .count{font-size:inherit!important;color:inherit!important;margin:0!important;font-family:inherit!important;letter-spacing:inherit}
