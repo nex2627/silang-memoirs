@@ -303,20 +303,19 @@ function Login({onLogin,theme,toggleTheme}){
 /* ---------------- Workspace shell ---------------- */
 // Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
 function PullRefresh(){
-  const [busy,setBusy]=useState(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
+  const busy=useRef(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
   useEffect(()=>{
     const MAX=120, GO=78
     const node=()=>el.current
     const paint=(v,smooth)=>{ const n=node(); if(!n) return; n.style.transition=smooth?'transform .5s cubic-bezier(.22,1,.36,1),opacity .4s':'none'; n.style.transform=`translate(-50%,${v-60}px)`; n.style.opacity=Math.min(1,v/46); const o=n.firstChild; if(o) o.style.transform=`rotate(${v*3.2}deg) scale(${.72+Math.min(1,v/GO)*.28})` }
-    const start=e=>{ if(window.innerWidth>760||busy) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0,armed:false} }
+    const start=e=>{ if(window.innerWidth>760||busy.current) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0,armed:false} }
     const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; paint(0,false); return }
       s.v=MAX*Math.tanh(dy/190); paint(s.v,false); const arm=s.v>=GO; if(arm!==s.armed){ s.armed=arm; node()?.classList.toggle('armed',arm) } }
     const end=()=>{ const s=st.current; if(!s.on) return; s.on=false
-      if(s.v>=GO){ paint(GO,true); setTimeout(()=>setBusy(true),120); setTimeout(()=>window.location.reload(),900) } else paint(0,true) }
+      if(s.v>=GO){ busy.current=true; paint(GO,true); node()?.classList.add('busy'); setTimeout(()=>window.location.reload(),800) } else paint(0,true) }
     window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:true}); window.addEventListener('touchend',end); window.addEventListener('touchcancel',end)
     return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
-  },[busy])
-  if(busy) return <div className="ptr-full"><div className="loader-orbit"><img className="loader-logo" src={LOGO} alt=""/><span className="loader-dot"/></div></div>
+  },[])
   return <div className="ptr" ref={el} style={{opacity:0,transform:'translate(-50%,-60px)'}}><div className="ptr-orbit"><img src={LOGO} alt=""/></div></div>
 }
 
@@ -353,7 +352,22 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     function onPop(e){ const st=e.state; if(st && st.page){ setPage(st.page); setDeptFocus(null) } else { supabase.auth.signOut() } }
     window.addEventListener('popstate',onPop); return ()=>window.removeEventListener('popstate',onPop)
   },[])
-  function goPage(n){ setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
+  const [dir,setDir]=useState('')
+  function goPage(n){ const a=nav.findIndex(x=>x[0]===page), b=nav.findIndex(x=>x[0]===n); setDir(b>a?'from-right':b<a?'from-left':''); setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
+  // Phone: swipe left/right anywhere on the page to move to the next/previous section.
+  const swipe=useRef({}); swipe.current={nav,page,goPage}
+  useEffect(()=>{
+    let x0=0,y0=0,ok=false
+    const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar')) return true
+      for(let n=t;n&&n!==document.body;n=n.parentElement){ if(n.scrollWidth>n.clientWidth+4){ const ox=getComputedStyle(n).overflowX; if(ox==='auto'||ox==='scroll') return true } } return false }
+    const start=e=>{ ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); x0=e.touches[0].clientX; y0=e.touches[0].clientY }
+    const end=e=>{ if(!ok) return; ok=false; const t=e.changedTouches[0]; const dx=t.clientX-x0, dy=t.clientY-y0
+      if(Math.abs(dx)<70||Math.abs(dx)<Math.abs(dy)*1.7) return
+      const {nav,page,goPage}=swipe.current; const i=nav.findIndex(n=>n[0]===page); const j=i+(dx<0?1:-1); if(j<0||j>=nav.length) return; goPage(nav[j][0]) }
+    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchend',end,{passive:true})
+    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchend',end) }
+  },[])
+  useEffect(()=>{ document.querySelector('.mobile-tab.active')?.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}) },[page])
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
   function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
 
@@ -392,7 +406,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
           <NotificationBell profile={profile}/>
         </div>
       </header>
-      <div className="content page-enter" key={page+String(deptFocus)}>
+      <div className={`content page-enter ${dir}`} key={page+String(deptFocus)}>
         {page==='Dashboard' && viewAll && <AdminDashboard profile={profile}/>}
         {page==='Dashboard' && !viewAll && mode==='hours' && <HoursDashboard profile={profile}/>}
         {page==='Dashboard' && !viewAll && mode==='tasks' && <TasksDashboard profile={profile}/>}
@@ -496,22 +510,27 @@ function PasswordModal({onClose}){
 /* ---------------- Stat + Modal shared ---------------- */
 function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong>{value}</strong><small>{note}</small></div> }
 function Modal({title,onClose,children}){
-  const [closing,setClosing]=useState(false); const box=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
-  useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; return ()=>{ document.body.style.overflow=prev } },[])
-  function close(){ if(done.current) return; done.current=true; setClosing(true); setTimeout(onClose,420) }
-  // Phone: pull the sheet down to close it (same as the X). Springs back if you let go early.
+  const [closing,setClosing]=useState(false); const box=useRef(null); const back=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
+  const [tb]=useState(()=>Math.max(0,Math.round(document.querySelector('.topbar')?.getBoundingClientRect().bottom||0)))
+  useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; document.documentElement.classList.add('modal-open'); return ()=>{ document.body.style.overflow=prev; document.documentElement.classList.remove('modal-open') } },[])
+  const phone=()=>window.innerWidth<=760
+  function slideOut(){ const el=box.current; if(!el) return; el.style.animation='none'; el.style.transition='transform .5s cubic-bezier(.22,1,.36,1)'; void el.offsetWidth; el.style.transform='translateY(110%)' }
+  // X / tap outside: on phones the sheet slides down exactly like pulling it down; on desktop it fades.
+  function close(){ if(done.current) return; done.current=true; if(phone()){ slideOut(); setClosing('drag'); setTimeout(onClose,480) } else { setClosing(true); setTimeout(onClose,420) } }
   useEffect(()=>{
-    const el=box.current; if(!el) return
-    const start=e=>{ if(window.innerWidth>760||done.current) return; if(el.scrollTop>0 && !e.target.closest('.modal-head')) return; drag.current={y:e.touches[0].clientY,on:true,dy:0}; el.style.animation='none'; el.style.transition='none' }
+    const el=box.current, bk=back.current; if(!el||!bk) return
+    const start=e=>{ if(!phone()||done.current) return; if(el.scrollTop>0 && !e.target.closest('.modal-head')) return; drag.current={y:e.touches[0].clientY,on:true,dy:0}; el.style.animation='none'; el.style.transition='none' }
     const move=e=>{ const d=drag.current; if(!d.on) return; const dy=e.touches[0].clientY-d.y; if(dy<=0){ d.dy=0; el.style.transform=''; return } d.dy=dy; el.style.transform=`translateY(${dy*.92}px)`; if(e.cancelable) e.preventDefault() }
     const end=()=>{ const d=drag.current; if(!d.on) return; d.on=false
-      if(d.dy>110){ done.current=true; el.style.transition='transform .42s cubic-bezier(.22,1,.36,1)'; el.style.transform='translateY(110%)'; setClosing('drag'); setTimeout(onClose,400) }
+      if(d.dy>110){ done.current=true; slideOut(); setClosing('drag'); setTimeout(onClose,480) }
       else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1)'; el.style.transform='' } }
+    const stopBg=e=>{ if(e.target===bk && e.cancelable) e.preventDefault() }   // the page behind must never scroll
     el.addEventListener('touchstart',start,{passive:true}); el.addEventListener('touchmove',move,{passive:false}); el.addEventListener('touchend',end); el.addEventListener('touchcancel',end)
-    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchmove',move); el.removeEventListener('touchend',end); el.removeEventListener('touchcancel',end) }
+    bk.addEventListener('touchmove',stopBg,{passive:false})
+    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchmove',move); el.removeEventListener('touchend',end); el.removeEventListener('touchcancel',end); bk.removeEventListener('touchmove',stopBg) }
   },[])  // eslint-disable-line
   // Rendered on <body> so the page's animations can never trap or shrink the overlay.
-  return createPortal(<div className={`modal-backdrop ${closing?'closing':''}`} onClick={e=>{ if(e.target===e.currentTarget) close() }}>
+  return createPortal(<div ref={back} style={{'--tb':tb+'px'}} className={`modal-backdrop ${closing?'closing':''}`} onClick={e=>{ if(e.target===e.currentTarget) close() }}>
     <div className={`modal ${closing===true?'closing':''}`} ref={box}><div className="modal-head"><h2>{title}</h2><button type="button" className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div>
   </div>,document.body)
 }
@@ -786,8 +805,7 @@ function HoursDashboard({profile}){
 function TasksDashboard({profile}){
   const role=profile.role; const worker=isWorker(role); const td=isTD(role)
   const [stats,setStats]=useState({open:0,done:0,total:0,members:0})
-  const [rows,setRows]=useState([])
-  const [undone,setUndone]=useState([])
+  const [allTasks,setAllTasks]=useState([]); const [sem,setSem]=useState('2')
   const [avail,setAvail]=useState([])
   const [teammates,setTeammates]=useState([])
   const [picks,setPicks]=useState({})
@@ -797,9 +815,7 @@ function TasksDashboard({profile}){
     if(worker) q=q.eq('assigned_to',profile.id); else q=q.in('department',managedTaskDepts(role))
     const {data}=await q; const list=data||[]
     let members=0; if(!worker){ members=(await fetchActive()).filter(p=>p.role==='staff_colorist').length }
-    setStats({ open:list.filter(t=>t.status!=='completed').length, done:list.filter(t=>t.status==='completed').length, total:list.length, members })
-    setRows(list.slice(0,8))
-    setUndone(list.filter(t=>t.status!=='completed'))
+    setAllTasks(list); setStats(st=>({...st,members}))
     if(td){
       const {data:done}=await supabase.from('schedules').select('id,title,start_at,end_at,sorted_at').eq('department','Media').eq('status','completed').order('start_at',{ascending:false})
       const {data:ownTasks}=await supabase.from('tasks').select('schedule_id').eq('department','Colorist').not('schedule_id','is',null)
@@ -817,14 +833,18 @@ function TasksDashboard({profile}){
     const {error}=await supabase.from('tasks').insert(ids.map(uid=>({ title:`${TD_STAGE.titlePrefix} — ${eventTitle}`, department:TD_STAGE.dept, assigned_to:uid, schedule_id:scheduleId, created_by:profile.id, assigned_date:todayISO() })))
     if(error) notifyDialog(error.message); else { setPicks(p=>({...p,[scheduleId]:new Set()})); load() }
   }
+  const semT=allTasks.filter(t=>inSem(t,sem)); const undone=semT.filter(t=>t.status!=='completed'); const rows=semT.slice(0,8)
+  const cnt=k=>allTasks.filter(t=>inSem(t,k)).length
+  const tstats={ open:undone.length, done:semT.filter(t=>t.status==='completed').length, total:semT.length }
   const list=worker?undone:rows
   return <div>
-    <WelcomeHero profile={profile} onCreate={canCreateTask(role)?()=>setOpenTask(true):null} createLabel="New task"/>
+    <WelcomeHero profile={profile} onCreate={canCreateTask(role)?()=>setOpenTask(true):null} createLabel="New task" aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={cnt('1')} h2={cnt('2')} unit="tasks" label={worker?'My total tasks':'Total tasks'}/>
     <section className="stats-grid">
-      <Stat title={worker?'My Tasks':'Open Tasks'} value={stats.open} note="Active work" icon={CheckSquare}/>
-      <Stat title="Completed" value={stats.done} note={worker?'Worked task number':'Finished'} icon={CheckCircle2}/>
+      <Stat title={worker?'My Tasks':'Open Tasks'} value={tstats.open} note="Active work" icon={CheckSquare}/>
+      <Stat title="Completed" value={tstats.done} note={worker?'Worked task number':'Finished'} icon={CheckCircle2}/>
       {!worker && <Stat title="Colorists" value={stats.members} note="Staff" icon={Users}/>}
-      <Stat title="Total Tasks" value={stats.total} note="All time" icon={ClipboardCheck}/>
+      <Stat title="Total Tasks" value={tstats.total} note="All time" icon={ClipboardCheck}/>
     </section>
     <ToSortPanel profile={profile}/>
     <MyEventsPanel profile={profile}/>
@@ -849,7 +869,7 @@ function TasksDashboard({profile}){
         {mine ? <ActionButton label={t.department==='Colorist'?'Colorgraded':'Done'} run={()=>markDone(t.id)} after={load}/> : <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>}</div> })}
         {list.length===0 && <div className="empty">Nothing here yet.</div>}</div>
     </div>
-    {hasPostingTracker(role) && <PostingTracker profile={profile}/>}
+    {hasPostingTracker(role) && <PostingTracker profile={profile} sem={sem}/>}
     {openTask && <TaskModal profile={profile} onClose={()=>setOpenTask(false)} onSaved={load}/>}
   </div>
 }
