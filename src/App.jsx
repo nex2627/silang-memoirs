@@ -1,4 +1,4 @@
-import { Children, useEffect, useMemo, useRef, useState } from 'react'
+import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from './lib/supabase'
 import {
@@ -62,10 +62,10 @@ function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
   const t=h1+h2; const p1=t?h1/t*100:0; const f=n=>unit==='hrs'?n.toFixed(1):String(n)
   const [go,setGo]=useState(false); useEffect(()=>{ const id=setTimeout(()=>setGo(true),80); return ()=>clearTimeout(id) },[])
   return <div className="panel sem-box">
-    <div className="sem-main"><small>{label}</small><div className="sem-big">{f(t)}<span>{unit}</span></div></div>
+    <div className="sem-main"><small>{label}</small><div className="sem-big"><CountUp value={f(t)}/><span>{unit}</span></div></div>
     <div className="sem-divider"/>
-    <div className="sem-part"><small>1st sem</small><div>{f(h1)}</div></div>
-    <div className="sem-part"><small>2nd sem</small><div>{f(h2)}</div></div>
+    <div className="sem-part"><small>1st sem</small><div><CountUp value={f(h1)}/></div></div>
+    <div className="sem-part"><small>2nd sem</small><div><CountUp value={f(h2)}/></div></div>
     <div className="sem-split"><div className="sem-legend"><span className="l1">1st sem</span><span className="l2">2nd sem</span></div>
       <div className="sem-bar"><i style={{width:`${go?p1:0}%`,background:'#b2b6ae'}}/><i style={{width:`${go?100-p1:0}%`,background:'var(--sand)'}}/></div></div>
   </div>
@@ -224,9 +224,10 @@ export default function App(){
         if(last && Date.now()-last>IDLE_LIMIT_MS){ await supabase.auth.signOut(); s=null }
       }
       if(!mounted) return
-      setSession(s); if(s) await loadProfile(s.user.id); else setProfile(null)
+      if(s) await loadProfile(s.user.id); else setProfile(null)
+      setSession(s)
     })()
-    const {data:sub}=supabase.auth.onAuthStateChange(async(_e,s)=>{ setSession(s); if(s) await loadProfile(s.user.id); else setProfile(null) })
+    const {data:sub}=supabase.auth.onAuthStateChange(async(_e,s)=>{ if(s) await loadProfile(s.user.id); else setProfile(null); setSession(s) })
     return ()=>{ mounted=false; sub.subscription.unsubscribe() }
   },[])
 
@@ -245,7 +246,7 @@ export default function App(){
 
   if(!supabase) return <SetupScreen theme={theme} toggleTheme={toggleTheme}/>
   if(session===undefined) return <LoadingScreen/>
-  if(!session) return <Login theme={theme} toggleTheme={toggleTheme} onLogin={async()=>{ const {data}=await supabase.auth.getSession(); setSession(data.session); if(data.session) await loadProfile(data.session.user.id) }}/>
+  if(!session) return <Login theme={theme} toggleTheme={toggleTheme} onLogin={async()=>{ const {data}=await supabase.auth.getSession(); if(data.session) await loadProfile(data.session.user.id); setSession(data.session) }}/>
   if(!profile) return <LoadingScreen/>
   if(!ROLE_META[profile.role] || profile.active===false) return <RetiredScreen profile={profile} theme={theme} toggleTheme={toggleTheme}/>
   return <Workspace profile={profile} onProfileRefresh={()=>loadProfile(profile.id)} theme={theme} toggleTheme={toggleTheme}/>
@@ -328,6 +329,11 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   async function installApp(){ if(!(await install.prompt())) setInstallOpen(true) }
   const role=profile.role; const mode=roleMode(role)
   // Text is protected from copying; only an admin can switch copying on, and it resets on every reload.
+  const [semDef,setSemDef]=useState({edbo:'2',head:'2',staff:'2'})
+  async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value})) }
+  useEffect(()=>{ loadSettings() },[])  // eslint-disable-line
+  usePoll(loadSettings,60000)
+  const settings=useMemo(()=>({ sem:semDef, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,profile.id])
   const [allowCopy,setAllowCopy]=useState(false); const canCopy=role==='admin'&&allowCopy
   useEffect(()=>{ document.documentElement.classList.toggle('allow-copy',canCopy); if(canCopy) return
     const inField=t=>t&&t.closest&&t.closest('input,textarea,[contenteditable=true]')
@@ -371,9 +377,9 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
   function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
 
-  async function logout(){ await supabase.auth.signOut() }
+  async function logout(){ const r=document.documentElement; r.classList.add('app-leaving'); await new Promise(res=>setTimeout(res,560)); await supabase.auth.signOut(); r.classList.remove('app-leaving') }
 
-  return <div className="app">
+  return <SettingsCtx.Provider value={settings}><div className="app">
     <aside className={`sidebar ${mobile?'open':''} ${collapsed?'collapsed':''}`}>
       <div className="brand">
         <img className="brand-mark" src={LOGO} alt="Silang Memoirs"/>
@@ -428,7 +434,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
     <DialogHost/>
-  </div>
+  </div></SettingsCtx.Provider>
 }
 
 /* ---------------- Notifications ---------------- */
@@ -508,7 +514,36 @@ function PasswordModal({onClose}){
 }
 
 /* ---------------- Stat + Modal shared ---------------- */
-function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong>{value}</strong><small>{note}</small></div> }
+// Numbers count up smoothly from 0 (and from the old number to the new one when data changes).
+function CountUp({value,dur=1300}){
+  const raw=String(value??''); const m=raw.match(/^(-?\d+(?:\.\d+)?)(.*)$/)
+  const num=m?parseFloat(m[1]):null; const dec=m&&m[1].includes('.')?m[1].split('.')[1].length:0; const suf=m?m[2]:''
+  const [v,setV]=useState(0); const from=useRef(0)
+  useEffect(()=>{
+    if(num===null) return
+    if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){ from.current=num; setV(num); return }
+    const t0=performance.now(), a=from.current; let raf
+    const tick=t=>{ const p=Math.min(1,(t-t0)/dur); const e=p>=1?1:1-Math.pow(2,-10*p); const cur=a+(num-a)*e; from.current=cur; setV(cur); if(p<1) raf=requestAnimationFrame(tick) }
+    raf=requestAnimationFrame(tick); return ()=>cancelAnimationFrame(raf)
+  },[num,dur])
+  if(num===null) return <>{raw}</>
+  return <span className="count">{v.toFixed(dec)}{suf}</span>
+}
+function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong><CountUp value={value}/></strong><small>{note}</small></div> }
+
+// Admin-controlled defaults (Control Center): which semester each group sees first.
+const SettingsCtx=createContext({sem:{edbo:'2',head:'2',staff:'2'},save:async()=>{}})
+function semGroup(role){ return role==='staff_media'||role==='staff_colorist'?'staff':role==='head_media'||role==='head_colorist'?'head':'edbo' }
+function useSem(role){ const ctx=useContext(SettingsCtx); const [v,setV]=useState(null); return [v??ctx.sem[semGroup(role)]??'2', setV] }
+function ControlCenter(){
+  const ctx=useContext(SettingsCtx)
+  const rows=[['edbo','EDBO board','EIC, AEIC, Art Director and the rest of the board (Admin follows this too)'],['head','Heads','Head Media and TD'],['staff','Staff','Media and Colorist staff']]
+  return <div className="panel control-center">
+    <div className="panel-title"><h2>Control center</h2></div>
+    <p className="cc-note">Pick which semester each group sees first. They can still switch it themselves; this only sets what they land on.</p>
+    {rows.map(([k,label,sub])=><div className="cc-row" key={k}><div><strong>{label}</strong><span>{sub}</span></div><SemSwitch value={ctx.sem[k]||'2'} onChange={v=>ctx.save(k,v)}/></div>)}
+  </div>
+}
 function Modal({title,onClose,children}){
   const [closing,setClosing]=useState(false); const box=useRef(null); const back=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
   const [tb]=useState(()=>Math.max(0,Math.round(document.querySelector('.topbar')?.getBoundingClientRect().bottom||0)))
@@ -641,7 +676,7 @@ const CARD_GROUPS=['Media','Colorist']
 function AdminDashboard({profile}){
   const [raw,setRaw]=useState({tasks:[],schedules:[]})
   const [counts,setCounts]=useState({})
-  const [detail,setDetail]=useState(null); const [sem,setSem]=useState('2')
+  const [detail,setDetail]=useState(null); const [sem,setSem]=useSem(profile.role)
   useEffect(()=>{ load() },[]); usePoll(load)
   async function load(){
     // Member counts show staff only — heads and the EDBO board are not counted here.
@@ -672,6 +707,7 @@ function AdminDashboard({profile}){
   }
   return <div>
     <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    {profile.role==='admin' && <ControlCenter/>}
     <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
     <div className="dept-grid two">{CARD_GROUPS.map(d=>{ const Icon=DEPT_ICON[d]; return <div key={d} className="panel dept-card" onClick={()=>openDetail(d)}>
       <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p>{counts[d]||0} members</p>
@@ -703,7 +739,7 @@ function AdminDashboard({profile}){
 function PostingTracker({profile,sem:semIn}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   const canPost=isAdminLike(profile.role)||profile.role==='art_director'
-  const [semOwn,setSem]=useState('2'); const sem=semIn??semOwn
+  const [semOwn,setSem]=useSem(profile.role); const sem=semIn??semOwn
   async function load(){
     const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,semester,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(300)
     const {data:tasks}=await supabase.from('tasks').select('schedule_id,department,status').not('schedule_id','is',null)
@@ -748,7 +784,7 @@ function sortProgress(s){ const m=(s.schedule_members||[]).filter(needsSort); if
 
 function HoursDashboard({profile}){
   const staff=isStaff(profile.role)
-  const [members,setMembers]=useState(0); const [allRows,setAllRows]=useState([]); const [sem,setSem]=useState('2')
+  const [members,setMembers]=useState(0); const [allRows,setAllRows]=useState([]); const [sem,setSem]=useSem(profile.role)
   const [items,setItems]=useState([])
   async function load(){
     const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department',profile.department).order('start_at',{ascending:true})
@@ -805,7 +841,7 @@ function HoursDashboard({profile}){
 function TasksDashboard({profile}){
   const role=profile.role; const worker=isWorker(role); const td=isTD(role)
   const [stats,setStats]=useState({open:0,done:0,total:0,members:0})
-  const [allTasks,setAllTasks]=useState([]); const [sem,setSem]=useState('2')
+  const [allTasks,setAllTasks]=useState([]); const [sem,setSem]=useSem(profile.role)
   const [avail,setAvail]=useState([])
   const [teammates,setTeammates]=useState([])
   const [picks,setPicks]=useState({})
@@ -879,7 +915,7 @@ function TaskTracker({profile}){
   const role=profile.role; const privileged=seesAll(role); const worker=isWorker(role)
   const canTask=isAdminLike(role)||isTD(role); const canEvent=isAdminLike(role)
   const [tasks,setTasks]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true)
-  const [deptFilter,setDeptFilter]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [search,setSearch]=useState(''); const [sem,setSem]=useState('2')
+  const [deptFilter,setDeptFilter]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [search,setSearch]=useState(''); const [sem,setSem]=useSem(profile.role)
   const [editTask,setEditTask]=useState(null); const [editEvent,setEditEvent]=useState(null)
   async function load(){
     let tq=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name,department)').eq('status','completed').order('completed_at',{ascending:false})
@@ -1175,7 +1211,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
 /* ---------------- Tracker (Head Media / Media: sorted events ledger) ---------------- */
 function Tracker({profile}){
   const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null)
-  const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2')
+  const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role)
   const can=canCreateSchedule(profile.role); const staff=isStaff(profile.role)
   async function load(){
     const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,sorted_at,duties,profiles(full_name))').eq('department','Media').in('status',['completed','done']).order('start_at',{ascending:false})
@@ -1497,7 +1533,7 @@ function Backup({profile}){
   const canSetLink=isAdminLike(role)||isHead(role)
   const showEvents=all||role==='head_media'
   const fixedGroup=all?'':(role==='head_media'?'Media':'Colorist')
-  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useState('2'); const [tot,setTot]=useState({h1:0,h2:0,unit:'hrs'})
+  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role); const [tot,setTot]=useState({h1:0,h2:0,unit:'hrs'})
   const [sheetUrl,setSheetUrl]=useState(''); const [urlDraft,setUrlDraft]=useState(''); const [saved,setSaved]=useState(false)
   const [people,setPeople]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
   const scope=all?'ALL':profile.department
