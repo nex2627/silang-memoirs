@@ -548,3 +548,26 @@ html.allow-copy body,html.allow-copy body *{-webkit-user-select:text!important;u
   .hero p{font-size:12.5px;max-width:34ch}
 }
 @keyframes sheetOut{from{transform:none}to{transform:translateY(100%)}}
+
+/* ---- Round 5 ---- */
+html.modal-open,html.modal-open body{overflow:hidden;overscroll-behavior:none}
+.modal-backdrop{overscroll-behavior:contain}
+.modal{overscroll-behavior:contain}
+.ptr.busy .ptr-orbit{animation:spin 1s linear infinite}
+@media(max-width:760px){
+  .loader-screen,.ptr-full{display:none!important}          /* no loading screen on refresh */
+  .modal-backdrop{top:var(--tb,0px)}                          /* the top bar stays visible */
+  .modal{max-height:calc(100dvh - var(--tb,0px) - 4px)}
+  .content.from-right,.content.from-left{animation:none}
+  .content.from-right>*,.content.from-left>*{animation:none}
+  .content.from-right{animation:slideInR .6s var(--ease) both}
+  .content.from-left{animation:slideInL .6s var(--ease) both}
+  .mobile-tabbar{overflow-x:auto;scrollbar-width:none}.mobile-tabbar::-webkit-scrollbar{display:none}
+}
+@keyframes slideInR{from{opacity:0;transform:translateX(46px)}to{opacity:1;transform:none}}
+@keyframes slideInL{from{opacity:0;transform:translateX(-46px)}to{opacity:1;transform:none}}
+@media(max-width:760px){
+  .hero>div:first-child{flex:1 1 100%}
+  .hero .sem-switch{margin-left:0;align-self:center}
+  .hero .primary-btn{margin-left:auto}
+}
