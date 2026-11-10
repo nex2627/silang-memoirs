@@ -5,7 +5,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
   ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
-  Download, Copy, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
+  Download, Copy, SlidersHorizontal, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 
 } from 'lucide-react'
 
@@ -344,7 +344,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
 
   const nav=useMemo(()=>{
     const base=[['Dashboard',LayoutDashboard],['Calendar',CalendarDays],['Notifications',Bell],['Tracker',FolderKanban]]
-    if(seesAll(role)){ base.push(['Members',Users],['Resources',Link2]); if(adminLike) base.push(['Announcements',Megaphone]); if(role==='admin') base.push(['Settings',SettingsIcon]); base.push(['Backup',Database]) }
+    if(seesAll(role)){ base.push(['Members',Users],['Resources',Link2]); if(adminLike) base.push(['Announcements',Megaphone]); if(role==='admin') base.push(['Settings',SettingsIcon],['Control Center',SlidersHorizontal]); base.push(['Backup',Database]) }
     else if(isHead(role)){ base.push(['Members',Users],['Resources',Link2],['Backup',Database]) }
     else base.push(['Resources',Link2])
     return base
@@ -358,20 +358,33 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     function onPop(e){ const st=e.state; if(st && st.page){ setPage(st.page); setDeptFocus(null) } else { supabase.auth.signOut() } }
     window.addEventListener('popstate',onPop); return ()=>window.removeEventListener('popstate',onPop)
   },[])
+  const navRef=useRef(null); const [pill,setPill]=useState({top:0,h:0,anim:false})
+  useEffect(()=>{
+    const measure=()=>{ const a=navRef.current&&navRef.current.querySelector('.nav-item.active'); if(a) setPill(p=>({top:a.offsetTop,h:a.offsetHeight,anim:p.anim})) }
+    measure(); const t1=setTimeout(measure,400), t2=setTimeout(()=>setPill(p=>({...p,anim:true})),120)
+    window.addEventListener('resize',measure); return ()=>{ clearTimeout(t1); clearTimeout(t2); window.removeEventListener('resize',measure) }
+  },[page,nav])
   const [dir,setDir]=useState('')
   function goPage(n){ const a=nav.findIndex(x=>x[0]===page), b=nav.findIndex(x=>x[0]===n); setDir(b>a?'from-right':b<a?'from-left':''); setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
   // Phone: swipe left/right anywhere on the page to move to the next/previous section.
   const swipe=useRef({}); swipe.current={nav,page,goPage}
   useEffect(()=>{
-    let x0=0,y0=0,ok=false
+    let x0=0,y0=0,ok=false,mode=null,el=null
     const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar')) return true
       for(let n=t;n&&n!==document.body;n=n.parentElement){ if(n.scrollWidth>n.clientWidth+4){ const ox=getComputedStyle(n).overflowX; if(ox==='auto'||ox==='scroll') return true } } return false }
-    const start=e=>{ ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); x0=e.touches[0].clientX; y0=e.touches[0].clientY }
-    const end=e=>{ if(!ok) return; ok=false; const t=e.changedTouches[0]; const dx=t.clientX-x0, dy=t.clientY-y0
-      if(Math.abs(dx)<70||Math.abs(dx)<Math.abs(dy)*1.7) return
-      const {nav,page,goPage}=swipe.current; const i=nav.findIndex(n=>n[0]===page); const j=i+(dx<0?1:-1); if(j<0||j>=nav.length) return; goPage(nav[j][0]) }
-    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchend',end,{passive:true})
-    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchend',end) }
+    const idx=()=>{ const {nav,page}=swipe.current; return nav.findIndex(n=>n[0]===page) }
+    const start=e=>{ ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); mode=null; x0=e.touches[0].clientX; y0=e.touches[0].clientY; el=document.querySelector('.content') }
+    const move=e=>{ if(!ok||!el) return; const dx=e.touches[0].clientX-x0, dy=e.touches[0].clientY-y0
+      if(!mode){ if(Math.abs(dx)<10&&Math.abs(dy)<10) return; mode=Math.abs(dx)>Math.abs(dy)*1.3?'h':'v'; if(mode==='h'){ el.style.animation='none'; el.style.transition='none'; el.style.willChange='transform,opacity' } }
+      if(mode!=='h') return
+      const {nav}=swipe.current; const i=idx(); const none=(dx<0&&i>=nav.length-1)||(dx>0&&i<=0); const d=none?dx*.22:dx
+      el.style.transform=`translateX(${d}px)`; el.style.opacity=String(1-Math.min(.55,Math.abs(d)/window.innerWidth*.7)); if(e.cancelable) e.preventDefault() }
+    const end=e=>{ if(!ok||!el) return; ok=false; if(mode!=='h') return
+      const dx=e.changedTouches[0].clientX-x0; const {nav,goPage}=swipe.current; const i=idx(); const j=i+(dx<0?1:-1); const W=window.innerWidth
+      if(Math.abs(dx)>Math.min(110,W*.28) && j>=0 && j<nav.length){ el.style.transition='transform .3s cubic-bezier(.4,0,.2,1),opacity .3s'; el.style.transform=`translateX(${dx<0?-W*.6:W*.6}px)`; el.style.opacity='0'; const n=nav[j][0]; setTimeout(()=>goPage(n),240) }
+      else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1),opacity .55s'; el.style.transform=''; el.style.opacity='' } }
+    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',end,{passive:true}); window.addEventListener('touchcancel',end,{passive:true})
+    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
   },[])
   useEffect(()=>{ document.querySelector('.mobile-tab.active')?.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}) },[page])
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
@@ -386,7 +399,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
         <div className="sb-text"><div className="brand-name">Silang Memoirs</div><div className="brand-sub">{EDITION.toUpperCase()}</div></div>
       </div>
       <div className="nav-label sb-text">WORKSPACE</div>
-      <nav>{nav.map(([n,I])=><button key={n} className={`nav-item ${page===n?'active':''}`} onClick={()=>onNavClick(n)} title={n}><I size={18} className="nav-ic"/><span className="sb-text">{n}</span>{page===n && <ChevronRight size={15} className="nav-arrow sb-text"/>}</button>)}</nav>
+      <nav ref={navRef}><span className={`nav-pill ${pill.anim?'anim':''}`} style={{top:pill.top,height:pill.h,opacity:pill.h?1:0}}/>{nav.map(([n,I])=><button key={n} className={`nav-item ${page===n?'active':''}`} onClick={()=>onNavClick(n)} title={n}><I size={18} className="nav-ic"/><span className="sb-text">{n}</span>{page===n && <ChevronRight size={15} className="nav-arrow sb-text"/>}</button>)}</nav>
       <div className="sidebar-bottom">
         <div className="profile-mini">
           <div className="avatar">{profile.avatar_url?<img src={profile.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(profile.full_name)}</div>
@@ -425,6 +438,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
         {page==='Resources' && <Resources profile={profile}/>}
         {page==='Announcements' && adminLike && <Announcements profile={profile}/>}
         {page==='Settings' && role==='admin' && <Settings profile={profile}/>}
+        {page==='Control Center' && role==='admin' && <ControlPage/>}
         {page==='Backup' && <Backup profile={profile}/>}
       </div>
     </main>
@@ -435,6 +449,13 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
     <DialogHost/>
   </div></SettingsCtx.Provider>
+}
+
+function ControlPage(){
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Control center</h1><p>Change app-wide defaults from here — no code needed.</p></div></section>
+    <ControlCenter/>
+  </div>
 }
 
 /* ---------------- Notifications ---------------- */
@@ -515,19 +536,20 @@ function PasswordModal({onClose}){
 
 /* ---------------- Stat + Modal shared ---------------- */
 // Numbers count up smoothly from 0 (and from the old number to the new one when data changes).
-function CountUp({value,dur=1300}){
+function CountUp({value,dur=1500}){
   const raw=String(value??''); const m=raw.match(/^(-?\d+(?:\.\d+)?)(.*)$/)
   const num=m?parseFloat(m[1]):null; const dec=m&&m[1].includes('.')?m[1].split('.')[1].length:0; const suf=m?m[2]:''
-  const [v,setV]=useState(0); const from=useRef(0)
+  const [st,setSt]=useState({v:0,p:0}); const from=useRef(0)
   useEffect(()=>{
     if(num===null) return
-    if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){ from.current=num; setV(num); return }
+    if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){ from.current=num; setSt({v:num,p:1}); return }
     const t0=performance.now(), a=from.current; let raf
-    const tick=t=>{ const p=Math.min(1,(t-t0)/dur); const e=p>=1?1:1-Math.pow(2,-10*p); const cur=a+(num-a)*e; from.current=cur; setV(cur); if(p<1) raf=requestAnimationFrame(tick) }
+    const tick=t=>{ const p=Math.min(1,(t-t0)/dur); const e=1-Math.pow(1-p,4); const cur=a+(num-a)*e; from.current=cur; setSt({v:cur,p:e}); if(p<1) raf=requestAnimationFrame(tick) }
     raf=requestAnimationFrame(tick); return ()=>cancelAnimationFrame(raf)
   },[num,dur])
   if(num===null) return <>{raw}</>
-  return <span className="count">{v.toFixed(dec)}{suf}</span>
+  const k=1-st.p   // blurry while it is moving, sharp when it lands
+  return <span className="count" style={{filter:k>.01?`blur(${(k*3.2).toFixed(2)}px)`:'none',opacity:.55+.45*st.p}}>{st.v.toFixed(dec)}{suf}</span>
 }
 function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong><CountUp value={value}/></strong><small>{note}</small></div> }
 
@@ -539,7 +561,7 @@ function ControlCenter(){
   const ctx=useContext(SettingsCtx)
   const rows=[['edbo','EDBO board','EIC, AEIC, Art Director and the rest of the board (Admin follows this too)'],['head','Heads','Head Media and TD'],['staff','Staff','Media and Colorist staff']]
   return <div className="panel control-center">
-    <div className="panel-title"><h2>Control center</h2></div>
+    <div className="panel-title"><h2>Default semester view</h2></div>
     <p className="cc-note">Pick which semester each group sees first. They can still switch it themselves; this only sets what they land on.</p>
     {rows.map(([k,label,sub])=><div className="cc-row" key={k}><div><strong>{label}</strong><span>{sub}</span></div><SemSwitch value={ctx.sem[k]||'2'} onChange={v=>ctx.save(k,v)}/></div>)}
   </div>
@@ -707,7 +729,6 @@ function AdminDashboard({profile}){
   }
   return <div>
     <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
-    {profile.role==='admin' && <ControlCenter/>}
     <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
     <div className="dept-grid two">{CARD_GROUPS.map(d=>{ const Icon=DEPT_ICON[d]; return <div key={d} className="panel dept-card" onClick={()=>openDetail(d)}>
       <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p>{counts[d]||0} members</p>
