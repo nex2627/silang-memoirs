@@ -605,3 +605,20 @@ html.app-leaving .app{animation:appOut .55s var(--ease-soft) both;pointer-events
   .filter-bar input,.filter-bar .sel,.filter-bar label{max-width:100%}
 }
 .sem-big .count{font-size:inherit!important;color:inherit!important;margin:0!important;font-family:inherit!important;letter-spacing:inherit}
+
+/* ---- Round 7 ---- */
+.control-center{padding:22px 24px;margin-bottom:14px}
+.control-center .panel-title{margin-bottom:6px}
+.sidebar nav{position:relative}
+.nav-item{position:relative;z-index:1}
+.nav-item.active,.nav-item.active:hover{background:transparent}
+.nav-pill{position:absolute;left:0;right:0;border-radius:8px;background:rgba(208,169,126,.16);z-index:0;pointer-events:none}
+.nav-pill.anim{transition:top .6s var(--ease),height .6s var(--ease),opacity .3s}
+.count{display:inline-block;will-change:filter,opacity}
+@media(max-width:760px){
+  .content.from-right{animation:slideInR .65s var(--ease) both!important}
+  .content.from-left{animation:slideInL .65s var(--ease) both!important}
+  .control-center{padding:18px 16px}
+}
+@keyframes slideInR{from{opacity:0;transform:translateX(64px)}to{opacity:1;transform:none}}
+@keyframes slideInL{from{opacity:0;transform:translateX(-64px)}to{opacity:1;transform:none}}
