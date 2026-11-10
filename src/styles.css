@@ -622,3 +622,24 @@ html.app-leaving .app{animation:appOut .55s var(--ease-soft) both;pointer-events
 }
 @keyframes slideInR{from{opacity:0;transform:translateX(64px)}to{opacity:1;transform:none}}
 @keyframes slideInL{from{opacity:0;transform:translateX(-64px)}to{opacity:1;transform:none}}
+
+/* ---- Round 8 ---- */
+/* the page shell must never keep a transform/filter, or fixed things (sidebar, tab bar) stop being fixed */
+.app{animation:appFade .9s var(--ease-soft) backwards!important}
+@keyframes appFade{from{opacity:0}to{opacity:1}}
+html.app-leaving .app{animation:appFadeOut .55s var(--ease-soft) both!important}
+@keyframes appFadeOut{from{opacity:1}to{opacity:0}}
+.content.from-right,.content.from-left{animation-fill-mode:backwards!important}
+/* popup: blur + dim the whole screen, header included */
+.modal-backdrop{inset:-24px!important;padding:52px 44px!important;background:rgba(15,10,8,.5)!important;-webkit-backdrop-filter:blur(7px);backdrop-filter:blur(7px)!important}
+.modal-backdrop.closing{animation:fadeOut .45s var(--ease-soft) both}
+.dept-metric .count,.sp .count{display:inline-block}
+.tab-pill{position:absolute;top:8px;bottom:8px;border-radius:12px;background:rgba(208,169,126,.18);pointer-events:none;z-index:0}
+.tab-pill.anim{transition:left .55s var(--ease),width .55s var(--ease),opacity .3s}
+@media(max-width:760px){
+  .modal-backdrop{inset:-24px!important;padding:0 24px 24px!important;top:-24px!important}
+  .main{touch-action:pan-y}
+  .mobile-tabbar{position:fixed}
+  .mobile-tab{position:relative;z-index:1}
+  .mobile-tab span{animation:fade .5s var(--ease-soft) both}
+}
