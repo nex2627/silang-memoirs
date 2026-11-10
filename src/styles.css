@@ -643,3 +643,10 @@ html.app-leaving .app{animation:appFadeOut .55s var(--ease-soft) both!important}
   .mobile-tab{position:relative;z-index:1}
   .mobile-tab span{animation:fade .5s var(--ease-soft) both}
 }
+
+/* ---- Round 9: bottom bar scrolls on its own and never moves the page ---- */
+body{overflow-x:clip}
+@media(max-width:760px){
+  .mobile-tabbar{justify-content:flex-start!important;padding:0!important;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+  .mobile-tab{flex:1 0 auto!important;min-width:48px;padding:0 12px}
+}
