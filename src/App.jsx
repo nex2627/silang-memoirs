@@ -364,6 +364,12 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     measure(); const t1=setTimeout(measure,400), t2=setTimeout(()=>setPill(p=>({...p,anim:true})),120)
     window.addEventListener('resize',measure); return ()=>{ clearTimeout(t1); clearTimeout(t2); window.removeEventListener('resize',measure) }
   },[page,nav])
+  const tabRef=useRef(null); const [tabPill,setTabPill]=useState({left:0,w:0,anim:false})
+  useEffect(()=>{
+    const measure=()=>{ const a=tabRef.current&&tabRef.current.querySelector('.mobile-tab.active'); if(a) setTabPill(p=>({left:a.offsetLeft,w:a.offsetWidth,anim:p.anim})) }
+    measure(); const ts=[60,200,420].map(ms=>setTimeout(measure,ms)); const t2=setTimeout(()=>setTabPill(p=>({...p,anim:true})),150)
+    window.addEventListener('resize',measure); return ()=>{ ts.forEach(clearTimeout); clearTimeout(t2); window.removeEventListener('resize',measure) }
+  },[page,nav])
   const [dir,setDir]=useState('')
   function goPage(n){ const a=nav.findIndex(x=>x[0]===page), b=nav.findIndex(x=>x[0]===n); setDir(b>a?'from-right':b<a?'from-left':''); setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
   // Phone: swipe left/right anywhere on the page to move to the next/previous section.
@@ -444,7 +450,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     </main>
     <PullRefresh/>
     {role==='admin' && <button type="button" className={`copy-toggle ${canCopy?'on':''}`} onClick={()=>setAllowCopy(v=>!v)} title="Allow copying text (admin only, resets on reload)"><Copy size={12}/> {canCopy?'Copy on':'Copy off'}</button>}
-    <nav className="mobile-tabbar">{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
+    <nav className="mobile-tabbar" ref={tabRef}><span className={`tab-pill ${tabPill.anim?'anim':''}`} style={{left:tabPill.left,width:tabPill.w,opacity:tabPill.w?1:0}}/>{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
     {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
     <DialogHost/>
@@ -731,8 +737,8 @@ function AdminDashboard({profile}){
     <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
     <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
     <div className="dept-grid two">{CARD_GROUPS.map(d=>{ const Icon=DEPT_ICON[d]; return <div key={d} className="panel dept-card" onClick={()=>openDetail(d)}>
-      <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p>{counts[d]||0} members</p>
-      <div className="dept-metric">{metrics[d]?.value ?? '—'}<small>{metrics[d]?.label}</small></div>
+      <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p><CountUp value={counts[d]||0}/> members</p>
+      <div className="dept-metric"><CountUp value={metrics[d]?.value ?? '—'}/><small>{metrics[d]?.label}</small></div>
     </div> })}</div>
     {detail && <Modal title={detail.dept} onClose={()=>setDetail(null)}>
       <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
@@ -1334,7 +1340,7 @@ function Members({profile}){
       {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
     </FilterBar>
     {SECTION_ORDER.map(sec=>{ const list=shown.filter(m=>groupOf(m.role)===sec); return list.length>0 && <div key={sec} className="members-section">
-      <div className="members-section-head"><h2>{sec==='Admin'?'Admin':sec==='EDBO'?'EDBO team':sec==='Media'?'Media team':'Colorist team'}</h2><span>{list.length}</span></div>
+      <div className="members-section-head"><h2>{sec==='Admin'?'Admin':sec==='EDBO'?'EDBO team':sec==='Media'?'Media team':'Colorist team'}</h2><span><CountUp value={list.length} dur={900}/></span></div>
       <div className="members-grid">{list.map(m=><div className={`panel member-card ${m.active===false?'inactive':''}`} key={m.id} onClick={()=>setDetail(m)}>
         <div className="member-top"><div className="avatar large">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>{m.active===false?<span className="active-dot off">● inactive</span>:<span className="active-dot">● active</span>}</div>
         <h3>{m.full_name}</h3><p>{sec==='EDBO'?`EDBO · ${roleLabel(m)}`:roleLabel(m)}</p>
@@ -1612,8 +1618,8 @@ function Backup({profile}){
             <ChevronRight size={16} className="person-chev"/><strong>{p.Name}</strong>{p.Inactive && <span className="inactive-tag">inactive</span>}
             <span className="person-meta">{p.Position} • {p.Section}</span>
             <span className="person-split">
-              {(p.H1+p.H2)>0 && <><span className="sp"><small>1st</small><b>{p.H1.toFixed(1)}</b></span><span className="sp"><small>2nd</small><b>{p.H2.toFixed(1)}</b></span><span className="sp"><small>total</small><b>{(p.H1+p.H2).toFixed(1)}</b></span></>}
-              {p.Tasks>0 && <span className="sp"><b>{p.TasksDone}</b><small>tasks done</small></span>}
+              {(p.H1+p.H2)>0 && <><span className="sp"><small>1st</small><b><CountUp value={p.H1.toFixed(1)}/></b></span><span className="sp"><small>2nd</small><b><CountUp value={p.H2.toFixed(1)}/></b></span><span className="sp"><small>total</small><b><CountUp value={(p.H1+p.H2).toFixed(1)}/></b></span></>}
+              {p.Tasks>0 && <span className="sp"><b><CountUp value={p.TasksDone}/></b><small>tasks done</small></span>}
               {!(p.H1+p.H2)&&!p.Tasks && <small>nothing yet</small>}</span>
           </button>
           {open && <div className="person-body">
