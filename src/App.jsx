@@ -5,7 +5,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
   ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
-  Download, Copy, SlidersHorizontal, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
+  Download, Copy, SlidersHorizontal, Activity as ActivityIcon, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 
 } from 'lucide-react'
 
@@ -122,18 +122,50 @@ function parseDateText(txt){
   return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
 }
 function isoToText(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${m}/${d}/${y}` }
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December']
+const isoOf=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+function CalendarPop({anchor,value,onPick,onClose,allowClear}){
+  const init=value?new Date(value+'T00:00:00'):new Date()
+  const [v,setV]=useState({y:init.getFullYear(),m:init.getMonth()}); const [mode,setMode]=useState('days'); const [pos,setPos]=useState(null); const ref=useRef(null)
+  const phone=window.innerWidth<=760
+  useEffect(()=>{
+    if(!phone&&anchor){ const r=anchor.getBoundingClientRect(); const w=320,h=392; const left=Math.min(Math.max(12,r.left),window.innerWidth-w-12); let top=r.bottom+8; if(top+h>window.innerHeight-12) top=Math.max(12,r.top-h-8); setPos({left,top}) }
+    const down=e=>{ if(ref.current&&!ref.current.contains(e.target)&&!(anchor&&anchor.contains(e.target))) onClose() }
+    const key=e=>{ if(e.key==='Escape') onClose() }
+    document.addEventListener('mousedown',down); document.addEventListener('keydown',key)
+    return ()=>{ document.removeEventListener('mousedown',down); document.removeEventListener('keydown',key) }
+  },[])  // eslint-disable-line
+  const first=new Date(v.y,v.m,1).getDay(); const cells=Array.from({length:42},(_,i)=>new Date(v.y,v.m,1-first+i)); const today=isoOf(new Date())
+  const step=n=>setV(x=>{ const d=new Date(x.y,x.m+n,1); return {y:d.getFullYear(),m:d.getMonth()} })
+  return createPortal(<div className={`cal-layer ${phone?'phone':''}`} onMouseDown={e=>{ if(phone&&e.target===e.currentTarget) onClose() }}>
+    <div className="cal-pop" ref={ref} style={phone?undefined:(pos||{opacity:0})}>
+      <div className="cal-head">
+        <button type="button" className="cal-nav" onClick={()=>mode==='days'?step(-1):setV(x=>({...x,y:x.y-1}))}><ChevronLeft size={16}/></button>
+        <button type="button" className="cal-title" onClick={()=>setMode(m=>m==='days'?'months':'days')}>{mode==='days'?`${MONTHS[v.m]} ${v.y}`:v.y}<ChevronDown size={14} className={mode==='months'?'flip':''}/></button>
+        <button type="button" className="cal-nav" onClick={()=>mode==='days'?step(1):setV(x=>({...x,y:x.y+1}))}><ChevronRight size={16}/></button>
+      </div>
+      {mode==='days' ? <>
+        <div className="cal-week">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div>
+        <div className="cal-grid" key={`${v.y}-${v.m}`}>{cells.map(d=>{ const iso=isoOf(d); const out=d.getMonth()!==v.m; return <button type="button" key={iso} className={`cal-day ${out?'out':''} ${iso===today?'today':''} ${iso===value?'sel':''}`} onClick={()=>{ onPick(iso); onClose() }}>{d.getDate()}</button> })}</div>
+      </> : <div className="cal-months">{MONTHS.map((n,i)=><button type="button" key={n} className={i===v.m?'sel':''} onClick={()=>{ setV(x=>({...x,m:i})); setMode('days') }}>{n.slice(0,3)}</button>)}</div>}
+      <div className="cal-foot">
+        {allowClear?<button type="button" onClick={()=>{ onPick(''); onClose() }}>Clear</button>:<span/>}
+        <button type="button" className="gold" onClick={()=>{ onPick(today); onClose() }}>Today</button>
+      </div>
+    </div>
+  </div>,document.body)
+}
 function DateField({value,onChange,required,placeholder='MM/DD/YYYY',className}){
   const [txt,setTxt]=useState(isoToText(value)); const [bad,setBad]=useState(false)
-  const pick=useRef(null); const box=useRef(null)
+  const [calOpen,setCalOpen]=useState(false); const wrap=useRef(null); const box=useRef(null)
   useEffect(()=>{ setTxt(isoToText(value)); setBad(false) },[value])
   useEffect(()=>{ box.current?.setCustomValidity(required&&!value?'Enter a valid date (e.g. 10/25/2026).':'') },[value,required])
   function commit(){ const iso=parseDateText(txt); if(iso===null){ setBad(true); onChange(''); return } setBad(false); onChange(iso); setTxt(isoToText(iso)) }
-  function openPicker(){ const el=pick.current; if(!el) return; try{ el.showPicker ? el.showPicker() : el.click() }catch{ el.click() } }
   return <div className={`date-field ${bad?'bad':''} ${className||''}`}>
-    <div className="date-field-box">
+    <div className="date-field-box" ref={wrap}>
       <input ref={box} inputMode="numeric" placeholder={placeholder} value={txt} onChange={e=>{ setTxt(e.target.value); const iso=parseDateText(e.target.value); if(iso) { setBad(false); onChange(iso) } else if(!e.target.value) onChange('') }} onBlur={commit} onKeyDown={e=>{ if(e.key==='Enter'){ commit() } }}/>
-      <button type="button" className="date-pick-btn" onClick={openPicker} tabIndex={-1} title="Pick from calendar"><CalendarDays size={15}/></button>
-      <input ref={pick} type="date" className="date-native" tabIndex={-1} value={value||''} onChange={e=>onChange(e.target.value)}/>
+      <button type="button" className="date-pick-btn" onClick={()=>setCalOpen(o=>!o)} tabIndex={-1} title="Pick from calendar"><CalendarDays size={15}/></button>
+      {calOpen && <CalendarPop anchor={wrap.current} value={value} allowClear={!required} onPick={v=>{ setBad(false); onChange(v) }} onClose={()=>setCalOpen(false)}/>}
     </div>
     {value && !bad && <small className="date-hint">{fmtDay(value)}</small>}
     {bad && <small className="date-hint err">Use MM/DD/YYYY</small>}
@@ -329,6 +361,9 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   async function installApp(){ if(!(await install.prompt())) setInstallOpen(true) }
   const role=profile.role; const mode=roleMode(role)
   // Text is protected from copying; only an admin can switch copying on, and it resets on every reload.
+  useEffect(()=>{ try{ if(sessionStorage.getItem('sm-logged')) return; sessionStorage.setItem('sm-logged','1') }catch{} supabase.rpc('log_activity',{p_action:'login',p_entity:'session',p_summary:''}).then(()=>{},()=>{}) },[])
+  useEffect(()=>{ const f=()=>document.documentElement.classList.toggle('scrolled',window.scrollY>4); f(); window.addEventListener('scroll',f,{passive:true}); return ()=>window.removeEventListener('scroll',f) },[])
+  const peekL=useRef(null), peekR=useRef(null)
   const [semDef,setSemDef]=useState({edbo:'2',head:'2',staff:'2'})
   async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value})) }
   useEffect(()=>{ loadSettings() },[])  // eslint-disable-line
@@ -344,7 +379,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
 
   const nav=useMemo(()=>{
     const base=[['Dashboard',LayoutDashboard],['Calendar',CalendarDays],['Notifications',Bell],['Tracker',FolderKanban]]
-    if(seesAll(role)){ base.push(['Members',Users],['Resources',Link2]); if(adminLike) base.push(['Announcements',Megaphone]); if(role==='admin') base.push(['Settings',SettingsIcon],['Control Center',SlidersHorizontal]); base.push(['Backup',Database]) }
+    if(seesAll(role)){ base.push(['Members',Users],['Resources',Link2]); if(adminLike) base.push(['Announcements',Megaphone]); if(role==='admin') base.push(['Settings',SettingsIcon],['Control Center',SlidersHorizontal],['Activity',ActivityIcon]); base.push(['Backup',Database]) }
     else if(isHead(role)){ base.push(['Members',Users],['Resources',Link2],['Backup',Database]) }
     else base.push(['Resources',Link2])
     return base
@@ -384,9 +419,12 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
       if(!mode){ if(Math.abs(dx)<10&&Math.abs(dy)<10) return; mode=Math.abs(dx)>Math.abs(dy)*1.3?'h':'v'; if(mode==='h'){ el.style.animation='none'; el.style.transition='none'; el.style.willChange='transform,opacity' } }
       if(mode!=='h') return
       const {nav}=swipe.current; const i=idx(); const none=(dx<0&&i>=nav.length-1)||(dx>0&&i<=0); const d=none?dx*.22:dx
-      el.style.transform=`translateX(${d}px)`; el.style.opacity=String(1-Math.min(.55,Math.abs(d)/window.innerWidth*.7)); if(e.cancelable) e.preventDefault() }
+      el.style.transform=`translateX(${d}px)`; el.style.opacity=String(1-Math.min(.55,Math.abs(d)/window.innerWidth*.7)); if(e.cancelable) e.preventDefault()
+      const L=peekL.current, R=peekR.current; const a=Math.abs(d); const on=!none?(dx>0?L:R):null; [L,R].forEach(n=>{ if(n&&n!==on){ n.style.width='0px'; n.style.opacity='0' } })
+      if(on){ on.style.transition='none'; on.style.width=a+'px'; on.style.opacity=String(Math.min(1,a/80)); on.style.setProperty('--k',String(Math.min(1,a/(window.innerWidth*.28)))) } }
     const end=e=>{ if(!ok||!el) return; ok=false; if(mode!=='h') return
       const dx=e.changedTouches[0].clientX-x0; const {nav,goPage}=swipe.current; const i=idx(); const j=i+(dx<0?1:-1); const W=window.innerWidth
+      ;[peekL.current,peekR.current].forEach(n=>{ if(n){ n.style.transition='width .45s cubic-bezier(.22,1,.36,1),opacity .35s'; n.style.width='0px'; n.style.opacity='0' } })
       if(Math.abs(dx)>Math.min(110,W*.28) && j>=0 && j<nav.length){ el.style.transition='transform .3s cubic-bezier(.4,0,.2,1),opacity .3s'; el.style.transform=`translateX(${dx<0?-W*.6:W*.6}px)`; el.style.opacity='0'; const n=nav[j][0]; setTimeout(()=>goPage(n),240) }
       else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1),opacity .55s'; el.style.transform=''; el.style.opacity='' } }
     window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',end,{passive:true}); window.addEventListener('touchcancel',end,{passive:true})
@@ -399,7 +437,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
   function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
 
-  async function logout(){ const r=document.documentElement; r.classList.add('app-leaving'); await new Promise(res=>setTimeout(res,560)); await supabase.auth.signOut(); r.classList.remove('app-leaving') }
+  async function logout(){ try{ await supabase.rpc('log_activity',{p_action:'logout',p_entity:'session',p_summary:''}); sessionStorage.removeItem('sm-logged') }catch{} const r=document.documentElement; r.classList.add('app-leaving'); await new Promise(res=>setTimeout(res,560)); await supabase.auth.signOut(); r.classList.remove('app-leaving') }
 
   return <SettingsCtx.Provider value={settings}><div className="app">
     <aside className={`sidebar ${mobile?'open':''} ${collapsed?'collapsed':''}`}>
@@ -448,16 +486,58 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
         {page==='Announcements' && adminLike && <Announcements profile={profile}/>}
         {page==='Settings' && role==='admin' && <Settings profile={profile}/>}
         {page==='Control Center' && role==='admin' && <ControlPage/>}
+        {page==='Activity' && role==='admin' && <ActivityPage/>}
         {page==='Backup' && <Backup profile={profile}/>}
       </div>
     </main>
     <PullRefresh/>
+    {(()=>{ const i=nav.findIndex(n=>n[0]===page); const P=nav[i-1], N=nav[i+1]; return <>
+      <div className="swipe-peek left" ref={peekL}>{P && <div className="pk-in">{(()=>{ const I=P[1]; return <I size={26}/> })()}<span>{P[0]}</span></div>}</div>
+      <div className="swipe-peek right" ref={peekR}>{N && <div className="pk-in">{(()=>{ const I=N[1]; return <I size={26}/> })()}<span>{N[0]}</span></div>}</div></> })()}
     {role==='admin' && <button type="button" className={`copy-toggle ${canCopy?'on':''}`} onClick={()=>setAllowCopy(v=>!v)} title="Allow copying text (admin only, resets on reload)"><Copy size={12}/> {canCopy?'Copy on':'Copy off'}</button>}
     <nav className="mobile-tabbar" ref={tabRef}><span className={`tab-pill ${tabPill.anim?'anim':''}`} style={{left:tabPill.left,width:tabPill.w,opacity:tabPill.w?1:0}}/>{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
     {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
     {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
     <DialogHost/>
   </div></SettingsCtx.Provider>
+}
+
+const ACT_ENTITY={schedules:'event',schedule_members:'event',tasks:'task',profiles:'member',resources:'resource',announcements:'announcement',app_settings:'setting',session:'session'}
+const ACT_ENTITY_FILTER=[['','All'],['schedules','Events'],['tasks','Tasks'],['profiles','Members'],['resources','Resources'],['announcements','Announcements'],['app_settings','Settings'],['session','Sign-ins']]
+const ACT_ACTION_FILTER=[['','All'],['created','Added'],['edited','Edited'],['deleted','Deleted'],['completed','Completed'],['sorted','Sorted'],['posted','Posted'],['status','Status'],['login','Log in'],['logout','Log out']]
+function actSentence(r){
+  const t=`“${r.summary||''}”`; const e=ACT_ENTITY[r.entity]||r.entity
+  switch(r.action){
+    case 'login': return 'logged in'; case 'logout': return 'logged out'
+    case 'created': return <>added {e} <b>{t}</b></>; case 'edited': return <>edited {e} <b>{t}</b></>; case 'deleted': return <>deleted {e} <b>{t}</b></>
+    case 'completed': return <>completed task <b>{t}</b></>; case 'sorted': return <>sorted <b>{t}</b></>; case 'posted': return <>marked <b>{t}</b> as posted</>
+    case 'status': return <>moved <b>{t}</b></>; default: return <>{r.action} <b>{t}</b></>
+  }
+}
+function ActivityPage(){
+  const [rows,setRows]=useState([]); const [loaded,setLoaded]=useState(false); const [q,setQ]=useState(''); const [act,setAct]=useState(''); const [ent,setEnt]=useState(''); const [date,setDate]=useState(''); const [err,setErr]=useState('')
+  async function load(){ const {data,error}=await supabase.from('activity_log').select('*').order('at',{ascending:false}).limit(400); if(error){ setErr(error.message) } else { setErr(''); setRows(data||[]) } setLoaded(true) }
+  useEffect(()=>{ load() },[]); usePoll(load,20000)
+  const shown=rows.filter(r=>(!act||r.action===act)&&(!ent||r.entity===ent||(ent==='schedules'&&r.entity==='schedule_members'))&&(!date||localISO(r.at)===date)&&(!q||(`${r.actor_name} ${r.summary} ${r.action}`).toLowerCase().includes(q.toLowerCase())))
+  const groups=[]; shown.forEach(r=>{ const k=localISO(r.at); let g=groups[groups.length-1]; if(!g||g.k!==k){ g={k,items:[]}; groups.push(g) } g.items.push(r) })
+  const dotCls=a=>a==='deleted'?'bad':a==='login'||a==='logout'?'dim':a==='completed'||a==='sorted'||a==='posted'?'good':a==='created'?'gold':'mid'
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Activity</h1><p>Who logged in, and who added, edited or removed things — newest first.</p></div></section>
+    <FilterBar search={q} onSearch={setQ} date={date} onDate={setDate} onClear={()=>{ setQ(''); setDate(''); setAct(''); setEnt('') }} extraActive={!!(act||ent)} placeholder="Search a name or item…">
+      <label>Type<Select value={act} onChange={e=>setAct(e.target.value)}>{ACT_ACTION_FILTER.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label>
+      <label>Where<Select value={ent} onChange={e=>setEnt(e.target.value)}>{ACT_ENTITY_FILTER.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label>
+    </FilterBar>
+    {err && <div className="panel" style={{padding:18,color:'var(--text-dim)',fontSize:13}}>Couldn’t load the log. Run <b>supabase/activity.sql</b> in the Supabase SQL editor first. <small>({err})</small></div>}
+    {!err && loaded && !shown.length && <div className="panel empty" style={{padding:30}}>No activity yet.</div>}
+    {groups.map(g=><div className="act-day" key={g.k}>
+      <div className="act-day-h">{fmtDay(g.k)}<span>{g.items.length}</span></div>
+      <div className="panel act-list">{g.items.map(r=><div className="act-row" key={r.id}>
+        <span className={`act-dot ${dotCls(r.action)}`}/>
+        <div className="act-main"><span className="act-text"><strong>{r.actor_name||'System'}</strong> {actSentence(r)}</span></div>
+        <time>{fmtTime(r.at)}</time>
+      </div>)}</div>
+    </div>)}
+  </div>
 }
 
 function ControlPage(){
@@ -656,9 +736,9 @@ function FilterBar({search,onSearch,date,onDate,children,onClear,extraActive,pla
 function ToSortPanel({profile}){
   const [items,setItems]=useState([])
   async function load(){
-    const {data}=await supabase.from('schedules').select('id,title,start_at,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').order('start_at')
+    const {data}=await supabase.from('schedules').select('id,title,start_at,end_at,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').order('start_at')
     const now=new Date()
-    setItems((data||[]).filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && needsSort(my) && !my.sorted && new Date(s.start_at)<=now }))
+    setItems((data||[]).filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && needsSort(my) && !my.sorted && new Date(s.end_at)<=now }))
   }
   useEffect(()=>{ load() },[profile.id]); usePoll(load)
   const mark=id=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',id).eq('member_id',profile.id)
@@ -704,38 +784,67 @@ function MyTasksPanel({profile}){
 }
 
 const CARD_GROUPS=['Media','Colorist']
+const DETAIL_GROUPS=[['all','All'],['edbo','EDBO'],['head','Heads'],['staff','Staff']]
+function DeptDetail({dept,raw,people,sem}){
+  const [g,setG]=useState('all'); const [open,setOpen]=useState({})
+  const byId=useMemo(()=>Object.fromEntries(people.map(p=>[p.id,p])),[people])
+  const inGrp=id=>g==='all'||(byId[id]&&semGroup(byId[id].role)===g)
+  const media=dept==='Media'; const now=new Date()
+  const evRows=raw.schedules.filter(s=>inSem(s,sem)&&(g==='all'||(s.schedule_members||[]).some(m=>inGrp(m.member_id))))
+  const tkRows=raw.tasks.filter(t=>t.department===dept&&inSem(t,sem)&&(g==='all'||inGrp(t.assigned_to)))
+  const stats=media?{ a:evRows.filter(s=>new Date(s.start_at)>=now).length, b:evRows.filter(s=>now>=new Date(s.start_at)&&now<=new Date(s.end_at)).length, c:evRows.filter(s=>s.status==='completed'||s.status==='done').length, d:evRows.reduce((x,s)=>x+evHours(s),0).toFixed(1) }
+    :{ a:tkRows.filter(t=>t.status==='not_started').length, b:tkRows.filter(t=>t.status==='in_progress').length, c:tkRows.filter(t=>t.status==='completed').length, d:tkRows.length }
+  const ids=new Set(media?evRows.flatMap(s=>(s.schedule_members||[]).map(m=>m.member_id)):tkRows.map(t=>t.assigned_to).filter(Boolean))
+  const list=people.filter(p=>ids.has(p.id)&&inGrp(p.id)).sort(dirSort).map(p=>({p, items:media?evRows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===p.id)).sort((x,y)=>new Date(y.start_at)-new Date(x.start_at)):tkRows.filter(t=>t.assigned_to===p.id), total:media?evRows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===p.id)).reduce((x,s)=>x+evHours(s),0):0}))
+  const allOpen=list.length>0&&list.every(x=>open[x.p.id])
+  const groupCount=k=>people.filter(p=>k==='all'||semGroup(p.role)===k).length
+  return <div className="detail">
+    <div className="chips">{DETAIL_GROUPS.map(([k,l])=><button type="button" key={k} className={g===k?'on':''} onClick={()=>setG(k)}>{l}<em>{groupCount(k)}</em></button>)}</div>
+    <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+      {media ? <>
+        <Stat title="Upcoming" value={stats.a} note="Events ahead" icon={CalendarDays}/>
+        <Stat title="Ongoing" value={stats.b} note="Happening now" icon={Clock3}/>
+        <Stat title="Sorted" value={stats.c} note="Wrapped" icon={CheckCircle2}/>
+        <Stat title="Total Hours" value={stats.d} note="Logged" icon={Clock3}/>
+      </> : <>
+        <Stat title="Not Started" value={stats.a} note="Queued" icon={CalendarDays}/>
+        <Stat title="Ongoing" value={stats.b} note="In progress" icon={Clock3}/>
+        <Stat title="Done" value={stats.c} note="Finished" icon={CheckCircle2}/>
+        <Stat title="Total Tasks" value={stats.d} note="All time" icon={ClipboardCheck}/>
+      </>}
+    </div>
+    <div className="acc-head"><h3>People <span>{list.length}</span></h3>{list.length>0 && <button type="button" onClick={()=>setOpen(allOpen?{}:Object.fromEntries(list.map(x=>[x.p.id,true])))}>{allOpen?'Collapse all':'Expand all'}</button>}</div>
+    {!list.length && <div className="empty" style={{padding:'14px 0'}}>Nobody in this group yet.</div>}
+    {list.map(({p,items,total})=><div className={`acc ${open[p.id]?'open':''}`} key={p.id}>
+      <button type="button" className="acc-row" onClick={()=>setOpen(o=>({...o,[p.id]:!o[p.id]}))}>
+        <span className="acc-av">{(p.full_name||'?').split(' ').map(w=>w[0]).slice(0,2).join('')}</span>
+        <span className="acc-name"><b>{p.full_name}</b><small>{roleLabel(p)}</small></span>
+        <span className="acc-fig">{media?<><CountUp value={total.toFixed(1)} dur={800}/> hrs</>:<><CountUp value={items.length} dur={800}/> tasks</>}</span>
+        <ChevronDown size={16} className="acc-chev"/>
+      </button>
+      <div className="acc-body"><div><ul>{items.map((x,i)=>media
+        ? <li key={i}><span>{x.title}</span><small>{fmtDay(x.start_at,false)} · {evHours(x).toFixed(1)}h</small></li>
+        : <li key={i}><span>{x.title}</span><small>{String(x.status).replace('_',' ')}</small></li>)}</ul></div></div>
+    </div>)}
+  </div>
+}
 function AdminDashboard({profile}){
   const [raw,setRaw]=useState({tasks:[],schedules:[]})
-  const [counts,setCounts]=useState({})
+  const [counts,setCounts]=useState({}); const [people,setPeople]=useState([])
   const [detail,setDetail]=useState(null); const [sem,setSem]=useSem(profile.role)
   useEffect(()=>{ load() },[]); usePoll(load)
   async function load(){
     // Member counts show staff only — heads and the EDBO board are not counted here.
     const profiles=await fetchActive()
     setCounts({ Media:(profiles||[]).filter(p=>p.role==='staff_media').length, Colorist:(profiles||[]).filter(p=>p.role==='staff_colorist').length })
-    const {data:tasks}=await supabase.from('tasks').select('department,status,semester')
-    const {data:schedules}=await supabase.from('schedules').select('department,start_at,end_at,status,semester')
+    setPeople(profiles||[])
+    const {data:tasks}=await supabase.from('tasks').select('title,department,status,semester,assigned_to')
+    const {data:schedules}=await supabase.from('schedules').select('id,title,department,start_at,end_at,status,semester,schedule_members(member_id)')
     setRaw({tasks:tasks||[],schedules:(schedules||[]).filter(s=>s.department==='Media')})
   }
   const hrsFor=k=>raw.schedules.filter(s=>inSem(s,k)).reduce((a,s)=>a+evHours(s),0)
   const metrics={ Media:{value:hrsFor(sem).toFixed(1),label:'hrs logged'}, Colorist:{value:raw.tasks.filter(t=>inSem(t,sem)&&t.department==='Colorist'&&t.status==='completed').length,label:'tasks done'} }
-  function openDetail(d){
-    let stats={upcoming:0,ongoing:0,done:0,totalHours:0,totalTasks:0}
-    if(d==='Media'){
-      const now=new Date(); const rows=raw.schedules.filter(s=>inSem(s,sem))
-      stats.upcoming=rows.filter(s=>new Date(s.start_at)>=now).length
-      stats.ongoing=rows.filter(s=>{ const st=new Date(s.start_at),en=new Date(s.end_at); return now>=st && now<=en }).length
-      stats.done=rows.filter(s=>s.status==='completed'||s.status==='done').length
-      stats.totalHours=rows.reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
-    } else {
-      const rows=raw.tasks.filter(t=>t.department===d&&inSem(t,sem))
-      stats.upcoming=rows.filter(t=>t.status==='not_started').length
-      stats.ongoing=rows.filter(t=>t.status==='in_progress').length
-      stats.done=rows.filter(t=>t.status==='completed').length
-      stats.totalTasks=rows.length
-    }
-    setDetail({dept:d,stats})
-  }
+  function openDetail(d){ setDetail(d) }
   return <div>
     <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
     <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
@@ -743,21 +852,7 @@ function AdminDashboard({profile}){
       <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p><CountUp value={counts[d]||0}/> members</p>
       <div className="dept-metric"><CountUp value={metrics[d]?.value ?? '—'}/><small>{metrics[d]?.label}</small></div>
     </div> })}</div>
-    {detail && <Modal title={detail.dept} onClose={()=>setDetail(null)}>
-      <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
-        {detail.dept==='Media' ? <>
-          <Stat title="Upcoming" value={detail.stats.upcoming} note="Events ahead" icon={CalendarDays}/>
-          <Stat title="Ongoing" value={detail.stats.ongoing} note="Happening now" icon={Clock3}/>
-          <Stat title="Sorted" value={detail.stats.done} note="Wrapped" icon={CheckCircle2}/>
-          <Stat title="Total Hours" value={detail.stats.totalHours.toFixed(1)} note="Logged" icon={Clock3}/>
-        </> : <>
-          <Stat title="Not Started" value={detail.stats.upcoming} note="Queued" icon={CalendarDays}/>
-          <Stat title="Ongoing" value={detail.stats.ongoing} note="In progress" icon={Clock3}/>
-          <Stat title="Done" value={detail.stats.done} note="Finished" icon={CheckCircle2}/>
-          <Stat title="Total Tasks" value={detail.stats.totalTasks} note="All time" icon={ClipboardCheck}/>
-        </>}
-      </div>
-    </Modal>}
+    {detail && <Modal title={detail} onClose={()=>setDetail(null)}><DeptDetail dept={detail} raw={raw} people={people} sem={sem}/></Modal>}
     {!isViewer(profile.role) && <ToSortPanel profile={profile}/>}
     {!isViewer(profile.role) && <MyEventsPanel profile={profile}/>}
     {!isViewer(profile.role) && <MyTasksPanel profile={profile}/>}
@@ -1090,6 +1185,7 @@ function CalendarPage({profile}){
   const markMySorted=scheduleId=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id)
   // Admin / EDBO only: sort the whole event on everyone's behalf.
   async function markAllSorted(sched){
+    if(new Date(sched.end_at)>new Date()){ notifyDialog('This event has not ended yet. You can mark it sorted once it is over.'); return }
     if(!await confirmDialog({title:'Mark whole event sorted?',body:'This marks every assigned photographer as sorted.',confirmLabel:'Mark sorted'})) return
     const n=(sched.schedule_members||[]).length
     const r= n ? await supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',sched.id) : await supabase.from('schedules').update({status:'completed'}).eq('id',sched.id)
@@ -1136,8 +1232,12 @@ function CalendarPage({profile}){
         {e.type==='schedule' && e.raw.legacy_colorist && <span>Colorist: {e.raw.legacy_colorist}</span>}
         {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id} className={`${m.sorted?'done':''} ${m.member_id===profile.id?'me':''}`}>{crewText(m)}{!needsSort(m)?'':m.sorted?' ✓ sorted':' • pending'}{m.member_id===profile.id?' (you)':''}</span>)}</div>}
         <div style={{marginTop:8,display:'flex',gap:8,flexWrap:'wrap'}}>
-          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted && needsSort(m)) && <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>}
-          {editMode && e.type==='schedule' && e.raw.status!=='completed' && isAdminLike(role) && <button className="ghost-btn" onClick={()=>markAllSorted(e.raw)}>Mark all sorted</button>}
+          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted && needsSort(m)) && (new Date(e.raw.end_at)<=new Date()
+            ? <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>
+            : <button type="button" className="ghost-btn" disabled title="Available after the event ends">Sorted — after the event ends</button>)}
+          {editMode && e.type==='schedule' && e.raw.status!=='completed' && isAdminLike(role) && (new Date(e.raw.end_at)<=new Date()
+            ? <button className="ghost-btn" onClick={()=>markAllSorted(e.raw)}>Mark all sorted</button>
+            : <button type="button" className="ghost-btn" disabled title="Available after the event ends">Mark all sorted — after the event ends</button>)}
           {e.type==='task' && e.raw.status!=='completed' && (e.raw.assigned_to===profile.id || isAdminLike(role)) && <ActionButton label={e.raw.department==='Colorist'?'Colorgraded':'Mark done'} doneLabel={e.raw.department==='Colorist'?'Colorgraded':'Done'} run={()=>markTaskDone(e.raw.id)} after={load}/>}
           {editMode && canEdit(e) && <button className="ghost-btn" onClick={()=>setEditItem(e)}><Pencil size={13}/> Edit</button>}
           {editMode && canEdit(e) && <button className="danger-btn" onClick={()=>deleteItem(e)}><Trash2 size={13}/> Delete</button>}
