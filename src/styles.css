@@ -756,3 +756,12 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .cc-link-in{display:flex;gap:8px;flex:1 1 280px;max-width:520px;min-width:0}
 .cc-link-in input{flex:1;min-width:0}
 @media(max-width:760px){.cc-link{flex-direction:column;align-items:stretch}.cc-link-in{max-width:none}}
+
+/* Round 12: duty pills (PM PC VM VC) unfold beside the name, one by one */
+.duty-pills{animation:dutyBox .55s var(--ease,cubic-bezier(.22,1,.36,1)) backwards;overflow:hidden;white-space:nowrap;vertical-align:middle}
+.duty-pills button{animation:dutyPop .55s var(--ease,cubic-bezier(.22,1,.36,1)) backwards;animation-delay:calc(var(--i,0)*70ms + 60ms);transition:background .35s,border-color .35s,color .35s,transform .25s}
+.duty-pills button:active{transform:scale(.9)}
+@keyframes dutyBox{from{max-width:0;opacity:0}to{max-width:220px;opacity:1}}
+@keyframes dutyPop{from{opacity:0;transform:translateX(-8px) scale(.6)}to{opacity:1;transform:none}}
+.person-body{animation:personOpen .5s var(--ease,cubic-bezier(.22,1,.36,1)) backwards;transform-origin:top}
+@keyframes personOpen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
