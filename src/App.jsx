@@ -1,4 +1,4 @@
-import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { Children, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { supabase } from './lib/supabase'
 import {
@@ -95,6 +95,22 @@ function managedTaskDepts(role){ if(seesAll(role)) return ['Colorist','Art Direc
 function hasPostingTracker(role){ return isAdminLike(role) || isTD(role) || role==='art_director' || role==='head_media' }
 function crewText(m){ return `${m.profiles?.full_name||''}${(m.duties||[]).length?` · ${m.duties.join('/')}`:''}` }
 function initials(name=''){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase() }
+// One avatar everywhere: the uploaded photo when there is one, initials otherwise.
+function Avatar({url,name,cls='avatar'}){
+  const [bad,setBad]=useState(false)
+  return <span className={cls}>{url&&!bad?<img src={url} alt="" loading="lazy" onError={()=>setBad(true)} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover',display:'block'}}/>:initials(name)}</span>
+}
+// Segmented switch with a pill that glides to the selected option (also works when the buttons wrap).
+function Seg({value,options,onChange,className='seg-switch'}){
+  const box=useRef(null); const [pill,setPill]=useState(null)
+  const place=()=>{ const b=box.current?.querySelector('button.on'); if(b) setPill({x:b.offsetLeft,y:b.offsetTop,w:b.offsetWidth,h:b.offsetHeight}) }
+  useLayoutEffect(()=>{ place() },[value,options.length])  // eslint-disable-line
+  useEffect(()=>{ const f=()=>place(); window.addEventListener('resize',f); const t=setTimeout(place,350); return ()=>{ window.removeEventListener('resize',f); clearTimeout(t) } },[])  // eslint-disable-line
+  return <div ref={box} className={`${className} seg-fx`} role="tablist">
+    {pill && <span className="seg-pill" style={{width:pill.w,height:pill.h,transform:`translate(${pill.x}px,${pill.y}px)`}}/>}
+    {options.map(([k,label,count])=><button type="button" key={k} className={value===k?'on':''} onClick={()=>onChange(k)}>{label}{count!==undefined&&<em>{count}</em>}</button>)}
+  </div>
+}
 function greet(){ const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening' }
 function sameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate() }
 function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
@@ -449,7 +465,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
       <nav ref={navRef}><span className={`nav-pill ${pill.anim?'anim':''}`} style={{top:pill.top,height:pill.h,opacity:pill.h?1:0}}/>{nav.map(([n,I])=><button key={n} className={`nav-item ${page===n?'active':''}`} onClick={()=>onNavClick(n)} title={n}><I size={18} className="nav-ic"/><span className="sb-text">{n}</span>{page===n && <ChevronRight size={15} className="nav-arrow sb-text"/>}</button>)}</nav>
       <div className="sidebar-bottom">
         <div className="profile-mini">
-          <div className="avatar">{profile.avatar_url?<img src={profile.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(profile.full_name)}</div>
+          <Avatar cls="avatar" url={profile.avatar_url} name={profile.full_name}/>
           <div className="sb-text"><strong>{profile.full_name}</strong><span>{roleLabel(profile)}</span></div>
         </div>
         {!install.installed && <button className="password-link full-width sb-text install-link" onClick={installApp} tabIndex={collapsed?-1:0}><Download size={13}/> Install app</button>}
@@ -461,7 +477,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
     <main className={`main ${collapsed?'sidebar-collapsed':''}`}>
       <header className="topbar">
         <div className="mobile-account">
-          <div className="avatar">{profile.avatar_url?<img src={profile.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(profile.full_name)}</div>
+          <Avatar cls="avatar" url={profile.avatar_url} name={profile.full_name}/>
           <div><strong>{profile.full_name}</strong><span>{roleLabel(profile)}</span></div>
           <button className="icon-btn" onClick={logout} title="Log out"><LogOut size={16}/></button>
         </div>
@@ -515,7 +531,8 @@ function actSentence(r){
   }
 }
 function ActivityPage(){
-  const [rows,setRows]=useState([]); const [loaded,setLoaded]=useState(false); const [q,setQ]=useState(''); const [act,setAct]=useState(''); const [ent,setEnt]=useState(''); const [date,setDate]=useState(''); const [err,setErr]=useState('')
+  const [rows,setRows]=useState([]); const [loaded,setLoaded]=useState(false); const [q,setQ]=useState(''); const [act,setAct]=useState(''); const [ent,setEnt]=useState(''); const [date,setDate]=useState(''); const [err,setErr]=useState(''); const [pf,setPf]=useState({})
+  useEffect(()=>{ fetchProfiles().then(l=>setPf(Object.fromEntries(l.map(x=>[x.id,x])))) },[])
   async function load(){ const {data,error}=await supabase.from('activity_log').select('*').order('at',{ascending:false}).limit(400); if(error){ setErr(error.message) } else { setErr(''); setRows(data||[]) } setLoaded(true) }
   useEffect(()=>{ load() },[]); usePoll(load,20000)
   const shown=rows.filter(r=>(!act||r.action===act)&&(!ent||r.entity===ent||(ent==='schedules'&&r.entity==='schedule_members'))&&(!date||localISO(r.at)===date)&&(!q||(`${r.actor_name} ${r.summary} ${r.action}`).toLowerCase().includes(q.toLowerCase())))
@@ -533,6 +550,7 @@ function ActivityPage(){
       <div className="act-day-h">{fmtDay(g.k)}<span>{g.items.length}</span></div>
       <div className="panel act-list">{g.items.map(r=><div className="act-row" key={r.id}>
         <span className={`act-dot ${dotCls(r.action)}`}/>
+        <Avatar cls="avatar sm" url={pf[r.actor_id]?.avatar_url} name={r.actor_name||'S'}/>
         <div className="act-main"><span className="act-text"><strong>{r.actor_name||'System'}</strong> {actSentence(r)}</span></div>
         <time>{fmtTime(r.at)}</time>
       </div>)}</div>
@@ -653,7 +671,26 @@ function ControlCenter(){
     <div className="panel-title"><h2>Default semester view</h2></div>
     <p className="cc-note">Pick which semester each group sees first. They can still switch it themselves; this only sets what they land on.</p>
     {rows.map(([k,label,sub])=><div className="cc-row" key={k}><div><strong>{label}</strong><span>{sub}</span></div><SemSwitch value={ctx.sem[k]||'2'} onChange={v=>ctx.save(k,v)}/></div>)}
+    <SheetLinks/>
   </div>
+}
+// Admin-only: every Google Sheet backup link lives here. Everyone else just gets the "Check Google Sheet" button.
+function SheetLinks(){
+  const scopes=[['ALL','Main spreadsheet','Shown to Admin, EIC, AEIC, EDBO and Art Director'],['Media','Media department','Shown to Head Media and Media staff'],['Colorist','Colorist department','Shown to TD and Colorist staff']]
+  const [vals,setVals]=useState({}); const [saved,setSaved]=useState({}); const [busy,setBusy]=useState('')
+  useEffect(()=>{ supabase.from('integrations').select('scope,sheet_webhook_url').then(({data})=>setVals(Object.fromEntries((data||[]).map(r=>[r.scope,r.sheet_webhook_url||''])))) },[])
+  async function save(scope){
+    setBusy(scope)
+    const {error}=await supabase.from('integrations').upsert({scope,sheet_webhook_url:(vals[scope]||'').trim(),updated_at:new Date().toISOString()},{onConflict:'scope'})
+    setBusy(''); if(error){ notifyDialog(error.message); return }
+    setSaved(o=>({...o,[scope]:true})); setTimeout(()=>setSaved(o=>({...o,[scope]:false})),1800)
+  }
+  return <>
+    <div className="panel-title" style={{marginTop:26}}><h2>Google Sheet links</h2></div>
+    <p className="cc-note">Paste each backup sheet’s share link here. Everyone else only sees a “Check Google Sheet” button on their Backup page.</p>
+    {scopes.map(([k,label,sub])=><div className="cc-row cc-link" key={k}><div><strong>{label}</strong><span>{sub}</span></div>
+      <div className="cc-link-in"><input className="filter-select" placeholder="https://docs.google.com/spreadsheets/…" value={vals[k]||''} onChange={e=>setVals(o=>({...o,[k]:e.target.value}))}/><button type="button" className="secondary-btn" disabled={busy===k} onClick={()=>save(k)}>{saved[k]?'Saved ✓':'Save'}</button></div></div>)}
+  </>
 }
 function Modal({title,onClose,children}){
   const [closing,setClosing]=useState(false); const box=useRef(null); const back=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
@@ -799,7 +836,7 @@ function DeptDetail({dept,raw,people,sem}){
   const allOpen=list.length>0&&list.every(x=>open[x.p.id])
   const groupCount=k=>people.filter(p=>k==='all'||semGroup(p.role)===k).length
   return <div className="detail">
-    <div className="chips">{DETAIL_GROUPS.map(([k,l])=><button type="button" key={k} className={g===k?'on':''} onClick={()=>setG(k)}>{l}<em>{groupCount(k)}</em></button>)}</div>
+    <Seg className="chips" value={g} onChange={setG} options={DETAIL_GROUPS.map(([k,l])=>[k,l,groupCount(k)])}/>
     <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
       {media ? <>
         <Stat title="Upcoming" value={stats.a} note="Events ahead" icon={CalendarDays}/>
@@ -817,7 +854,7 @@ function DeptDetail({dept,raw,people,sem}){
     {!list.length && <div className="empty" style={{padding:'14px 0'}}>Nobody in this group yet.</div>}
     {list.map(({p,items,total})=><div className={`acc ${open[p.id]?'open':''}`} key={p.id}>
       <button type="button" className="acc-row" onClick={()=>setOpen(o=>({...o,[p.id]:!o[p.id]}))}>
-        <span className="acc-av">{(p.full_name||'?').split(' ').map(w=>w[0]).slice(0,2).join('')}</span>
+        <Avatar cls="acc-av" url={p.avatar_url} name={p.full_name}/>
         <span className="acc-name"><b>{p.full_name}</b><small>{roleLabel(p)}</small></span>
         <span className="acc-fig">{media?<><CountUp value={total.toFixed(1)} dur={800}/> hrs</>:<><CountUp value={items.length} dur={800}/> tasks</>}</span>
         <ChevronDown size={16} className="acc-chev"/>
@@ -1221,7 +1258,7 @@ function CalendarPage({profile}){
       {!upcoming.length && <div className="empty">Nothing upcoming.</div>}</div>
     </div>
     {selected && <Modal title={selected.date.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'})} onClose={()=>setSelected(null)}>
-      {anyEditable && <div className="seg-switch" role="tablist"><button type="button" className={!editMode?'on':''} onClick={()=>setEditMode(false)}><Eye size={13}/> View</button><button type="button" className={editMode?'on':''} onClick={()=>setEditMode(true)}><Pencil size={13}/> Edit</button></div>}
+      {anyEditable && <Seg value={editMode?'e':'v'} onChange={v=>setEditMode(v==='e')} options={[['v',<><Eye size={13}/> View</>],['e',<><Pencil size={13}/> Edit</>]]}/>}
       {selected.items.map(e=><div key={e.id} className="day-detail-row">
         <strong>{e.title}</strong>
         {e.type==='schedule' && <><span>{e.raw.department} • {fmtTime(e.raw.start_at)} – {fmtTime(e.raw.end_at)} ({Math.max(0,(new Date(e.raw.end_at)-new Date(e.raw.start_at))/3600000).toFixed(1)}h)</span>
@@ -1445,7 +1482,7 @@ function Members({profile}){
     {SECTION_ORDER.map(sec=>{ const list=shown.filter(m=>groupOf(m.role)===sec); return list.length>0 && <div key={sec} className="members-section">
       <div className="members-section-head"><h2>{sec==='Admin'?'Admin':sec==='EDBO'?'EDBO team':sec==='Media'?'Media team':'Colorist team'}</h2><span><CountUp value={list.length} dur={900}/></span></div>
       <div className="members-grid">{list.map(m=><div className={`panel member-card ${m.active===false?'inactive':''}`} key={m.id} onClick={()=>setDetail(m)}>
-        <div className="member-top"><div className="avatar large">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>{m.active===false?<span className="active-dot off">● inactive</span>:<span className="active-dot">● active</span>}</div>
+        <div className="member-top"><Avatar cls="avatar large" url={m.avatar_url} name={m.full_name}/>{m.active===false?<span className="active-dot off">● inactive</span>:<span className="active-dot">● active</span>}</div>
         <h3>{m.full_name}</h3><p>{sec==='EDBO'?`EDBO · ${roleLabel(m)}`:roleLabel(m)}</p>
         <div className="member-meta"><span>{sec}</span><span>{sec==='EDBO'?(m.position||'—'):(m.position||'—')}</span></div>
       </div>)}</div>
@@ -1612,7 +1649,7 @@ function Settings({profile}){
     </FilterBar>
     <div className="panel">{filtered.map(m=><div className="settings-row" key={m.id}>
       <div className="settings-who">
-        <div className="avatar">{m.avatar_url?<img src={m.avatar_url} alt="" style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover'}}/>:initials(m.full_name)}</div>
+        <Avatar cls="avatar" url={m.avatar_url} name={m.full_name}/>
         <div className="settings-text"><strong>{m.full_name}{m.active===false?' (inactive)':''}</strong><span>{ROLE_META[m.role]?roleLabel(m):'Old role (unused)'}{m.email?` • ${m.email}`:''}</span></div>
       </div>
       <div className="settings-actions"><button className="ghost-btn" onClick={()=>setEdit(m)}>Edit</button><button className="ghost-btn" onClick={()=>setReset(m)}><KeyRound size={13}/> Reset password</button></div>
@@ -1660,15 +1697,14 @@ function ResetPasswordModal({member,onClose}){
 /* ---------------- Backup ---------------- */
 function Backup({profile}){
   const role=profile.role; const all=seesAll(role)
-  const canSetLink=isAdminLike(role)||isHead(role)
   const showEvents=all||role==='head_media'
   const fixedGroup=all?'':(role==='head_media'?'Media':'Colorist')
   const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role); const [tot,setTot]=useState({h1:0,h2:0,unit:'hrs'})
-  const [sheetUrl,setSheetUrl]=useState(''); const [urlDraft,setUrlDraft]=useState(''); const [saved,setSaved]=useState(false)
+  const [sheetUrl,setSheetUrl]=useState('')
   const [people,setPeople]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
   const scope=all?'ALL':profile.department
   async function load(){
-    const {data:intg}=await supabase.from('integrations').select('*').eq('scope',scope).maybeSingle(); setSheetUrl(intg?.sheet_webhook_url||''); setUrlDraft(u=>u||intg?.sheet_webhook_url||'')
+    const {data:intg}=await supabase.from('integrations').select('*').eq('scope',scope).maybeSingle(); setSheetUrl(intg?.sheet_webhook_url||'')
     const profiles=await fetchProfiles()   // includes deactivated people, so their hours stay readable
     const {data:tasks0}=await supabase.from('tasks').select('id,assigned_to,title,assigned_date,completed_at,status,semester,department,schedule_id')
     const {data:scheds0}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,semester,legacy_media,legacy_colorist,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
@@ -1685,14 +1721,13 @@ function Backup({profile}){
         ...mineE.map(s=>{ const d=(s.schedule_members.find(m=>m.member_id===p.id)?.duties||[]); return {iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Duty:d.join('/'),Range:`${fmtTime(s.start_at)} → ${fmtTime(s.end_at)}`,Value:`${hrsOf(s).toFixed(1)} h`} }),
         ...mineT.map(t=>({iso:t.assigned_date||'',Date:fmtDay(t.assigned_date),Event:t.title,Duty:'',Range:`${fmtDay(t.assigned_date,false)} → ${t.completed_at?fmtDay(t.completed_at,false):'not done yet'}`,Value:t.status.replace('_',' ')}))
       ].sort((a,b)=>String(a.iso).localeCompare(String(b.iso)))
-      return { id:p.id, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), H1:hrsIn(scheds0||[],'1',p.id), H2:hrsIn(scheds0||[],'2',p.id), Inactive:p.active===false, AllTasks:(tasks0||[]).filter(t=>t.assigned_to===p.id).length, Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
+      return { id:p.id, Avatar:p.avatar_url, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), H1:hrsIn(scheds0||[],'1',p.id), H2:hrsIn(scheds0||[],'2',p.id), Inactive:p.active===false, AllTasks:(tasks0||[]).filter(t=>t.assigned_to===p.id).length, Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
     }).filter(x=>!x.Inactive||x.H1+x.H2>0||x.AllTasks>0).sort((a,b)=>(a.Inactive-b.Inactive)||a.Name.localeCompare(b.Name))
     setPeople(list)
     setEvents((scheds||[]).map(s=>({id:s.id,iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Medias:[...(s.schedule_members||[]).map(m=>`${nameOf(m.member_id)}${(m.duties||[]).length?` (${m.duties.join('/')})`:''}`),...(s.legacy_media?[s.legacy_media]:[])].filter(Boolean).join(', '),Colorist:[...tasks.filter(t=>t.schedule_id===s.id&&t.department==='Colorist').map(t=>nameOf(t.assigned_to)),...(s.legacy_colorist?[s.legacy_colorist]:[])].filter(Boolean).join(', '),Hours:hrsOf(s).toFixed(1)})))
     setLoading(false)
   }
   useEffect(()=>{ load() },[profile.id,sem]); usePoll(load,60000)
-  async function saveLink(){ const {error}=await supabase.from('integrations').upsert({scope,sheet_webhook_url:urlDraft,updated_by:profile.id,updated_at:new Date().toISOString()},{onConflict:'scope'}); if(error) notifyDialog(error.message); else { setSheetUrl(urlDraft); setSaved(true); setTimeout(()=>setSaved(false),2000) } }
   const q=search.trim().toLowerCase()
   const shownPeople=people.filter(p=>(!group||p.Section===group)&&(!q||`${p.Name} ${p.Position}`.toLowerCase().includes(q))&&(!dateFilter||p.rows.some(r=>r.iso===dateFilter)))
   const shownEvents=events.filter(e=>(!dateFilter||e.iso===dateFilter)&&(!q||`${e.Event} ${e.Medias} ${e.Colorist}`.toLowerCase().includes(q)))
@@ -1703,10 +1738,8 @@ function Backup({profile}){
     <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{all?'Main spreadsheet backup':`${profile.department} backup`}</h1><p>Everyone is listed by name — tap a name to see all of their events and tasks. The switch filters the lists; the box always shows both semesters.</p></div><SemSwitch value={sem} onChange={setSem}/></section>
     <SemSummary h1={tot.h1} h2={tot.h2} unit={tot.unit} label={tot.unit==='hrs'?'Total hours':'Colorgrading done'}/>
     <div className="panel task-panel" style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:14,flexWrap:'wrap'}}>
-      <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>The sheet pulls live data by itself (see the README, section 5) — this page only keeps the link.</p></div>
+      <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>The sheet updates by itself — tap the button to open it.</p></div>
       <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-        {canSetLink && <input className="filter-select" style={{width:220}} placeholder="Paste the sheet's share URL" value={urlDraft} onChange={e=>setUrlDraft(e.target.value)}/>}
-        {canSetLink && <button className="secondary-btn" onClick={saveLink}>{saved?'Saved ✓':'Save link'}</button>}
         {sheetUrl && <a className="primary-btn" href={sheetUrl} target="_blank" rel="noreferrer"><ExternalLink size={15}/> Check Google Sheet</a>}
       </div>
     </div>
@@ -1718,7 +1751,7 @@ function Backup({profile}){
       {loading ? <div className="empty">Loading…</div> : shownPeople.map(p=>{ const open=openId===p.id; const rows=p.rows.filter(r=>!dateFilter||r.iso===dateFilter)
         return <div key={p.id} className={`person-acc ${open?'open':''}`}>
           <button type="button" className="person-head" onClick={()=>setOpenId(open?null:p.id)}>
-            <ChevronRight size={16} className="person-chev"/><strong>{p.Name}</strong>{p.Inactive && <span className="inactive-tag">inactive</span>}
+            <ChevronRight size={16} className="person-chev"/><Avatar cls="avatar sm" url={p.Avatar} name={p.Name}/><strong>{p.Name}</strong>{p.Inactive && <span className="inactive-tag">inactive</span>}
             <span className="person-meta">{p.Position} • {p.Section}</span>
             <span className="person-split">
               {(p.H1+p.H2)>0 && <><span className="sp"><small>1st</small><b><CountUp value={p.H1.toFixed(1)}/></b></span><span className="sp"><small>2nd</small><b><CountUp value={p.H2.toFixed(1)}/></b></span><span className="sp"><small>total</small><b><CountUp value={(p.H1+p.H2).toFixed(1)}/></b></span></>}
