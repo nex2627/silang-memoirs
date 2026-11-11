@@ -1,6 +1,6 @@
 import { Children, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { supabase } from './lib/supabase'
+import { supabase, applyLoginMode } from './lib/supabase'
 import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
@@ -381,10 +381,12 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   useEffect(()=>{ const f=()=>document.documentElement.classList.toggle('scrolled',window.scrollY>4); f(); window.addEventListener('scroll',f,{passive:true}); return ()=>window.removeEventListener('scroll',f) },[])
   const peekL=useRef(null), peekR=useRef(null)
   const [semDef,setSemDef]=useState({edbo:'2',head:'2',staff:'2'})
-  async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value})) }
+  const [loginMode,setLoginMode]=useState('session')
+  async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value}))
+    const {data:lm}=await supabase.from('app_settings').select('value').eq('key','login_mode').maybeSingle(); const m=lm?.value?.mode==='remember'?'remember':'session'; setLoginMode(m); applyLoginMode(m) }
   useEffect(()=>{ loadSettings() },[])  // eslint-disable-line
   usePoll(loadSettings,60000)
-  const settings=useMemo(()=>({ sem:semDef, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,profile.id])
+  const settings=useMemo(()=>({ sem:semDef, loginMode, saveLogin:async mode=>{ setLoginMode(mode); applyLoginMode(mode); const {error}=await supabase.from('app_settings').upsert({key:'login_mode',value:{mode},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message) }, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,loginMode,profile.id])
   const [allowCopy,setAllowCopy]=useState(false); const canCopy=role==='admin'&&allowCopy
   useEffect(()=>{ document.documentElement.classList.toggle('allow-copy',canCopy); if(canCopy) return
     const inField=t=>t&&t.closest&&t.closest('input,textarea,[contenteditable=true]')
@@ -671,6 +673,10 @@ function ControlCenter(){
     <div className="panel-title"><h2>Default semester view</h2></div>
     <p className="cc-note">Pick which semester each group sees first. They can still switch it themselves; this only sets what they land on.</p>
     {rows.map(([k,label,sub])=><div className="cc-row" key={k}><div><strong>{label}</strong><span>{sub}</span></div><SemSwitch value={ctx.sem[k]||'2'} onChange={v=>ctx.save(k,v)}/></div>)}
+    <div className="panel-title" style={{marginTop:26}}><h2>Login</h2></div>
+    <p className="cc-note">Choose how long people stay logged in. This applies to everyone, and takes effect the next time they open the app.</p>
+    <div className="cc-row"><div><strong>Stay logged in?</strong><span>{ctx.loginMode==='remember'?'Remember me: people stay signed in on their device until they log out.':'Log in every visit: closing the tab or app signs people out.'}</span></div>
+      <Seg value={ctx.loginMode||'session'} onChange={v=>ctx.saveLogin(v)} options={[['session','Log in every visit'],['remember','Remember me']]}/></div>
     <SheetLinks/>
   </div>
 }
