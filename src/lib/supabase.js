@@ -3,29 +3,31 @@ import { createClient } from '@supabase/supabase-js'
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 
-function makeStorage(){
-  let ls, ss
-  try{ ls=window.localStorage; ss=window.sessionStorage }catch{ return undefined }
-  const me=Math.random().toString(36).slice(2)
-  let mode=null
-  let ch=null; try{ ch=new BroadcastChannel('sm-tabs') }catch{}
-  const ready=new Promise(resolve=>{
-    const finish=m=>{ if(mode) return; mode=m; try{ ss.setItem('sm-tab-mode',m) }catch{} resolve() }
-    if(ss.getItem('sm-tab-mode')==='own'){ mode='own'; resolve() }
-    if(!ch){ finish('main'); return }
-    ch.onmessage=ev=>{
-      const d=ev.data||{}
-      if(d.t==='whois' && mode==='main') ch.postMessage({t:'main',id:me,to:d.from})
-      else if(d.t==='main' && d.to===me && d.id!==me) finish('own')
-    }
-    if(!mode){ ch.postMessage({t:'whois',from:me}); setTimeout(()=>finish('main'),350) }
-  })
-  const box=()=>mode==='own'?ss:ls
-  return {
-    getItem:async k=>{ await ready; return box().getItem(k) },
-    setItem:async(k,v)=>{ await ready; box().setItem(k,v) },
-    removeItem:async k=>{ await ready; box().removeItem(k) }
-  }
+// The admin picks the login style in Control Center:
+//  'session'  -> login lives in sessionStorage only (closing the tab / app = log in again, every tab is its own login)
+//  'remember' -> login is also kept in localStorage so people stay signed in
+// The last known choice is cached here so it's already applied before anyone logs in.
+let ls=null, ss=null
+try{ ls=window.localStorage; ss=window.sessionStorage }catch{}
+const isAuthKey=k=>k.startsWith('sb-')
+let mode='session'
+try{ if(ls && ls.getItem('sm-login-mode')==='remember') mode='remember' }catch{}
+const purgeLocal=()=>{ try{ Object.keys(ls).filter(isAuthKey).forEach(k=>ls.removeItem(k)) }catch{} }
+if(mode!=='remember') purgeLocal()
+
+export function applyLoginMode(m){
+  mode=m==='remember'?'remember':'session'
+  try{ ls.setItem('sm-login-mode',mode) }catch{}
+  try{
+    if(mode==='remember') Object.keys(ss).filter(isAuthKey).forEach(k=>ls.setItem(k,ss.getItem(k)))
+    else purgeLocal()
+  }catch{}
 }
 
-export const supabase = url && key ? createClient(url, key, { auth:{ storage:makeStorage(), persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null
+const storage = (ls&&ss) ? {
+  getItem:k=>{ let v=null; try{ v=ss.getItem(k) }catch{} if(v==null && mode==='remember'){ try{ v=ls.getItem(k) }catch{} } return v },
+  setItem:(k,v)=>{ try{ ss.setItem(k,v) }catch{} if(mode==='remember'){ try{ ls.setItem(k,v) }catch{} } },
+  removeItem:k=>{ try{ ss.removeItem(k) }catch{} try{ ls.removeItem(k) }catch{} }
+} : undefined
+
+export const supabase = url && key ? createClient(url, key, { auth:{ storage, persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null
