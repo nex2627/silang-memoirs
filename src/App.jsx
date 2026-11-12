@@ -355,11 +355,11 @@ function Login({onLogin,theme,toggleTheme}){
 function EdgeBounce(){
   const glow=useRef(null)
   useEffect(()=>{
-    const MAX=70; let target=0, cur=0, raf=0, timer=null, node=null, live=false
+    const MAX=70; let target=0, cur=0, raf=0, timer=null, node=null, live=false, lock=0
     const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; return {top:y<=0,bot:y+window.innerHeight>=document.documentElement.scrollHeight-1} }
     const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
     const frame=()=>{
-      cur+=(target-cur)*(target===0?0.14:0.3)
+      cur+=(target-cur)*(target===0?0.38:0.45)
       if(Math.abs(cur)<0.15&&target===0){ cur=0 }
       if(node){ node.style.transform=cur?`translate3d(0,${cur.toFixed(2)}px,0)`:'' }
       const g=glow.current; if(g){ const a=Math.min(1,Math.abs(cur)/MAX); g.style.opacity=a; g.style.transform=`translateY(${cur>0?'-':''}${(1-a)*30}px)`; g.className='edge-glow '+(cur>0?'top':'bot') }
@@ -367,12 +367,12 @@ function EdgeBounce(){
     }
     const kick=()=>{ if(!live){ live=true; node=document.querySelector('.main > .content'); if(node) node.style.willChange='transform' } if(!raf) raf=requestAnimationFrame(frame) }
     const pull=d=>{ const room=1-Math.min(1,Math.abs(target)/MAX); target=Math.max(-MAX,Math.min(MAX,target+d*0.4*Math.max(.1,room))); kick() }
-    const release=()=>{ target=0; kick() }
+    const release=()=>{ target=0; lock=Date.now()+350; kick() }
     const onWheel=e=>{
-      if(blocked(e.target)) return
+      if(blocked(e.target)||Date.now()<lock) return   // trackpad momentum after letting go must not pull again
       const {top,bot}=edge(); const dy=e.deltaY
       if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)) return
-      if((top&&dy<0)||(bot&&dy>0)){ pull(-dy); clearTimeout(timer); timer=setTimeout(release,70) }
+      if((top&&dy<0)||(bot&&dy>0)){ pull(-dy); clearTimeout(timer); timer=setTimeout(release,45) }
       else if(target){ release() }
     }
     let ty=0, tOn=false
@@ -390,7 +390,7 @@ function PullRefresh(){
   useEffect(()=>{
     const MAX=120, GO=78
     const node=()=>el.current
-    const paint=(v,smooth)=>{ const n=node(); if(!n) return; n.style.transition=smooth?'transform .5s cubic-bezier(.22,1,.36,1),opacity .4s':'none'; n.style.transform=`translate(-50%,${v-60}px)`; n.style.opacity=Math.min(1,v/46); const o=n.firstChild; if(o) o.style.transform=`rotate(${v*3.2}deg) scale(${.72+Math.min(1,v/GO)*.28})` }
+    const paint=(v,smooth)=>{ const n=node(); if(!n) return; n.style.transition=smooth?'transform .28s cubic-bezier(.22,1,.36,1),opacity .22s':'none'; n.style.transform=`translate(-50%,${v-60}px)`; n.style.opacity=Math.min(1,v/46); const o=n.firstChild; if(o) o.style.transform=`rotate(${v*3.2}deg) scale(${.72+Math.min(1,v/GO)*.28})` }
     const start=e=>{ if(window.innerWidth>760||busy.current) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0,armed:false} }
     const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; paint(0,false); return }
       s.v=MAX*Math.tanh(dy/190); paint(s.v,false); const arm=s.v>=GO; if(arm!==s.armed){ s.armed=arm; node()?.classList.toggle('armed',arm) } }
