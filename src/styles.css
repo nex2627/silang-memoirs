@@ -772,3 +772,10 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .duty-pills button{animation:none!important;opacity:0;transform:translateX(-8px) scale(.6);transition:opacity .3s ease,transform .4s var(--ease,cubic-bezier(.22,1,.36,1)),background .35s,border-color .35s,color .35s;transition-delay:calc((3 - var(--i,0))*45ms)}
 .crew-item.on .duty-pills button{opacity:1;transform:none;transition-delay:calc(var(--i,0)*70ms + 60ms)}
 .crew-item.on .duty-pills button:active{transform:scale(.9)}
+
+/* Round 14: one-line stat cards, hero actions group */
+@media(min-width:1051px){.stats-grid:not([style]){grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}}
+.hero-actions{display:flex;align-items:center;gap:14px;flex-shrink:0;align-self:flex-end}
+.hero-actions .sem-switch{align-self:center}
+@media(max-width:760px){.hero-actions{flex:1 1 100%;justify-content:space-between;align-self:stretch}.hero-actions .sem-switch{flex:0 1 auto}}
+.main>.content{will-change:auto}
