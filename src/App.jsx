@@ -359,10 +359,10 @@ function EdgeBounce(){
     const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; return {top:y<=0,bot:y+window.innerHeight>=document.documentElement.scrollHeight-1} }
     const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
     function play(dir){   // dir: 'top' or 'bot'
-      if(Date.now()<cool) return; cool=Date.now()+700
+      if(Date.now()<cool) return; cool=Date.now()+950
       const n=document.querySelector('.main > .content'); const g=glow.current
-      if(n&&n.animate){ const d=dir==='top'?1:-1; n.animate([{transform:'translate3d(0,0,0)'},{transform:`translate3d(0,${22*d}px,0)`,offset:.3},{transform:`translate3d(0,${-4*d}px,0)`,offset:.6},{transform:'translate3d(0,0,0)'}],{duration:500,easing:'cubic-bezier(.22,1,.36,1)'}) }
-      if(g){ g.className='edge-glow '+dir; void g.offsetWidth; g.classList.add('go'); setTimeout(()=>g.classList.remove('go'),560) }
+      if(n&&n.animate){ const d=dir==='top'?1:-1; n.animate([{transform:'translate3d(0,0,0)',easing:'cubic-bezier(.2,.7,.3,1)'},{transform:`translate3d(0,${40*d}px,0)`,offset:.38,easing:'cubic-bezier(.45,0,.25,1)'},{transform:`translate3d(0,${-7*d}px,0)`,offset:.72,easing:'cubic-bezier(.4,0,.3,1)'},{transform:'translate3d(0,0,0)'}],{duration:900}) }
+      if(g){ g.className='edge-glow '+dir; void g.offsetWidth; g.classList.add('go'); setTimeout(()=>g.classList.remove('go'),900) }
     }
     const onWheel=e=>{
       if(blocked(e.target)) return
