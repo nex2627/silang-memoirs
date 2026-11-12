@@ -765,3 +765,10 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 @keyframes dutyPop{from{opacity:0;transform:translateX(-8px) scale(.6)}to{opacity:1;transform:none}}
 .person-body{animation:personOpen .5s var(--ease,cubic-bezier(.22,1,.36,1)) backwards;transform-origin:top}
 @keyframes personOpen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
+/* Round 13: duty pills fold away as smoothly as they unfold (always mounted, driven by .crew-item.on) */
+.duty-pills{animation:none!important;max-width:0;opacity:0;visibility:hidden;pointer-events:none;transition:max-width .5s var(--ease,cubic-bezier(.22,1,.36,1)),opacity .35s ease,visibility 0s linear .5s}
+.crew-item.on .duty-pills{max-width:220px;opacity:1;visibility:visible;pointer-events:auto;transition:max-width .55s var(--ease,cubic-bezier(.22,1,.36,1)),opacity .4s ease,visibility 0s}
+.duty-pills button{animation:none!important;opacity:0;transform:translateX(-8px) scale(.6);transition:opacity .3s ease,transform .4s var(--ease,cubic-bezier(.22,1,.36,1)),background .35s,border-color .35s,color .35s;transition-delay:calc((3 - var(--i,0))*45ms)}
+.crew-item.on .duty-pills button{opacity:1;transform:none;transition-delay:calc(var(--i,0)*70ms + 60ms)}
+.crew-item.on .duty-pills button:active{transform:scale(.9)}
