@@ -351,6 +351,32 @@ function Login({onLogin,theme,toggleTheme}){
 
 /* ---------------- Workspace shell ---------------- */
 // Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
+// Soft rubber-band when you scroll past the top or bottom of a page, then it eases back.
+function EdgeBounce(){
+  useEffect(()=>{
+    const MAX=84; let off=0, timer=null
+    const box=()=>document.querySelector('.main > .content')
+    const paint=(v,smooth)=>{ const n=box(); if(!n) return; off=v; n.style.transition=smooth?'transform .8s cubic-bezier(.22,1,.36,1)':'none'; n.style.transform=v?`translate3d(0,${v}px,0)`:''; if(!v&&smooth) setTimeout(()=>{ if(!off&&n) { n.style.transition=''; n.style.transform='' } },850) }
+    const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; const top=y<=0; const bot=y+window.innerHeight>=document.documentElement.scrollHeight-1; return {top,bot} }
+    const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
+    const add=d=>{ const sign=d>0?1:-1; if(off&&Math.sign(off)!==sign){ paint(0,true); return } const room=1-Math.abs(off)/MAX; paint(Math.max(-MAX,Math.min(MAX,off+d*0.45*Math.max(.12,room))),false) }
+    const onWheel=e=>{
+      if(blocked(e.target)) return
+      const {top,bot}=edge(); const dy=e.deltaY
+      if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)) return
+      if((top&&dy<0)||(bot&&dy>0)){ add(-dy); clearTimeout(timer); timer=setTimeout(()=>paint(0,true),110) }
+      else if(off){ clearTimeout(timer); paint(0,true) }
+    }
+    let ty=0, tOn=false
+    const ts=e=>{ if(window.innerWidth>760||blocked(e.target)) return; ty=e.touches[0].clientY; tOn=edge().bot }
+    const tm=e=>{ if(!tOn) return; const dy=e.touches[0].clientY-ty; if(dy<0&&edge().bot){ paint(Math.max(-MAX,dy*.4),false) } else if(off){ paint(0,true) } }
+    const te=()=>{ if(off) paint(0,true); tOn=false }
+    window.addEventListener('wheel',onWheel,{passive:true})
+    window.addEventListener('touchstart',ts,{passive:true}); window.addEventListener('touchmove',tm,{passive:true}); window.addEventListener('touchend',te); window.addEventListener('touchcancel',te)
+    return ()=>{ clearTimeout(timer); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm); window.removeEventListener('touchend',te); window.removeEventListener('touchcancel',te) }
+  },[])
+  return null
+}
 function PullRefresh(){
   const busy=useRef(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
   useEffect(()=>{
@@ -509,6 +535,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
       </div>
     </main>
     <PullRefresh/>
+    <EdgeBounce/>
     {(()=>{ const i=nav.findIndex(n=>n[0]===page); const P=nav[i-1], N=nav[i+1]; return <>
       <div className="swipe-peek left" ref={peekL}>{P && <div className="pk-in">{(()=>{ const I=P[1]; return <I size={26}/> })()}<span>{P[0]}</span></div>}</div>
       <div className="swipe-peek right" ref={peekR}>{N && <div className="pk-in">{(()=>{ const I=N[1]; return <I size={26}/> })()}<span>{N[0]}</span></div>}</div></> })()}
@@ -745,8 +772,7 @@ function WelcomeHero({profile,children,onCreate,createLabel,aside}){
   return <section className="hero">
     <div><div className="eyebrow"><Sparkles size={14}/> {seesAll(profile.role)?'COMMAND CENTER':(roleDept(profile.role)||'').toUpperCase()+' DESK'}</div>
     <h1><span className="greet-sub">{greet()},</span> <span className="greet-name">{profile.full_name.split(' ')[0]}.</span></h1><p>{WELCOME_LINE}</p></div>
-    {aside}
-    {onCreate && <button className="primary-btn" onClick={onCreate}><Plus size={17}/> {createLabel}</button>}
+    {(aside||onCreate) && <div className="hero-actions">{aside}{onCreate && <button className="primary-btn" onClick={onCreate}><Plus size={17}/> {createLabel}</button>}</div>}
   </section>
 }
 
