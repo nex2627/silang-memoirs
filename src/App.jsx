@@ -351,31 +351,39 @@ function Login({onLogin,theme,toggleTheme}){
 
 /* ---------------- Workspace shell ---------------- */
 // Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
-// Soft rubber-band when you scroll past the top or bottom of a page, then it eases back.
+// Soft rubber-band at the top / bottom of a page. One requestAnimationFrame loop eases toward the pull, so it stays light.
 function EdgeBounce(){
+  const glow=useRef(null)
   useEffect(()=>{
-    const MAX=84; let off=0, timer=null
-    const box=()=>document.querySelector('.main > .content')
-    const paint=(v,smooth)=>{ const n=box(); if(!n) return; off=v; n.style.transition=smooth?'transform .8s cubic-bezier(.22,1,.36,1)':'none'; n.style.transform=v?`translate3d(0,${v}px,0)`:''; if(!v&&smooth) setTimeout(()=>{ if(!off&&n) { n.style.transition=''; n.style.transform='' } },850) }
-    const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; const top=y<=0; const bot=y+window.innerHeight>=document.documentElement.scrollHeight-1; return {top,bot} }
+    const MAX=70; let target=0, cur=0, raf=0, timer=null, node=null, live=false
+    const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; return {top:y<=0,bot:y+window.innerHeight>=document.documentElement.scrollHeight-1} }
     const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
-    const add=d=>{ const sign=d>0?1:-1; if(off&&Math.sign(off)!==sign){ paint(0,true); return } const room=1-Math.abs(off)/MAX; paint(Math.max(-MAX,Math.min(MAX,off+d*0.45*Math.max(.12,room))),false) }
+    const frame=()=>{
+      cur+=(target-cur)*(target===0?0.14:0.3)
+      if(Math.abs(cur)<0.15&&target===0){ cur=0 }
+      if(node){ node.style.transform=cur?`translate3d(0,${cur.toFixed(2)}px,0)`:'' }
+      const g=glow.current; if(g){ const a=Math.min(1,Math.abs(cur)/MAX); g.style.opacity=a; g.style.transform=`translateY(${cur>0?'-':''}${(1-a)*30}px)`; g.className='edge-glow '+(cur>0?'top':'bot') }
+      if(cur||target){ raf=requestAnimationFrame(frame) } else { raf=0; live=false; if(node){ node.style.willChange=''; node.style.transform='' } if(g) g.style.opacity=0 }
+    }
+    const kick=()=>{ if(!live){ live=true; node=document.querySelector('.main > .content'); if(node) node.style.willChange='transform' } if(!raf) raf=requestAnimationFrame(frame) }
+    const pull=d=>{ const room=1-Math.min(1,Math.abs(target)/MAX); target=Math.max(-MAX,Math.min(MAX,target+d*0.4*Math.max(.1,room))); kick() }
+    const release=()=>{ target=0; kick() }
     const onWheel=e=>{
       if(blocked(e.target)) return
       const {top,bot}=edge(); const dy=e.deltaY
       if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)) return
-      if((top&&dy<0)||(bot&&dy>0)){ add(-dy); clearTimeout(timer); timer=setTimeout(()=>paint(0,true),110) }
-      else if(off){ clearTimeout(timer); paint(0,true) }
+      if((top&&dy<0)||(bot&&dy>0)){ pull(-dy); clearTimeout(timer); timer=setTimeout(release,70) }
+      else if(target){ release() }
     }
     let ty=0, tOn=false
     const ts=e=>{ if(window.innerWidth>760||blocked(e.target)) return; ty=e.touches[0].clientY; tOn=edge().bot }
-    const tm=e=>{ if(!tOn) return; const dy=e.touches[0].clientY-ty; if(dy<0&&edge().bot){ paint(Math.max(-MAX,dy*.4),false) } else if(off){ paint(0,true) } }
-    const te=()=>{ if(off) paint(0,true); tOn=false }
+    const tm=e=>{ if(!tOn) return; const dy=e.touches[0].clientY-ty; if(dy<0&&edge().bot){ target=Math.max(-MAX,dy*.4); kick() } else if(target){ release() } }
+    const te=()=>{ tOn=false; if(target) release() }
     window.addEventListener('wheel',onWheel,{passive:true})
     window.addEventListener('touchstart',ts,{passive:true}); window.addEventListener('touchmove',tm,{passive:true}); window.addEventListener('touchend',te); window.addEventListener('touchcancel',te)
-    return ()=>{ clearTimeout(timer); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm); window.removeEventListener('touchend',te); window.removeEventListener('touchcancel',te) }
+    return ()=>{ clearTimeout(timer); cancelAnimationFrame(raf); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm); window.removeEventListener('touchend',te); window.removeEventListener('touchcancel',te) }
   },[])
-  return null
+  return <div ref={glow} className="edge-glow bot" aria-hidden="true"/>
 }
 function PullRefresh(){
   const busy=useRef(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
