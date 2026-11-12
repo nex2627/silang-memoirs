@@ -787,3 +787,12 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .edge-glow.top{top:60px;background:radial-gradient(ellipse 60% 100% at 50% 0%,rgba(208,169,126,.55),transparent 70%)}
 .edge-glow.bot{bottom:0;background:radial-gradient(ellipse 60% 100% at 50% 100%,rgba(208,169,126,.55),transparent 70%)}
 @media(max-width:760px){.edge-glow.bot{bottom:64px}.edge-glow.top{top:56px}}
+
+/* Round 16: one-shot edge bounce (plays instantly, no live tracking) */
+.edge-glow{transition:none;opacity:0}
+.edge-glow.go{animation:glowPulse .55s ease-out}
+@keyframes glowPulse{0%{opacity:0}25%{opacity:1}100%{opacity:0}}
+.main>.content.bounce-top{animation:bounceTop .5s cubic-bezier(.22,1,.36,1)}
+.main>.content.bounce-bot{animation:bounceBot .5s cubic-bezier(.22,1,.36,1)}
+@keyframes bounceTop{0%{transform:translate3d(0,0,0)}30%{transform:translate3d(0,22px,0)}60%{transform:translate3d(0,-4px,0)}100%{transform:translate3d(0,0,0)}}
+@keyframes bounceBot{0%{transform:translate3d(0,0,0)}30%{transform:translate3d(0,-22px,0)}60%{transform:translate3d(0,4px,0)}100%{transform:translate3d(0,0,0)}}
