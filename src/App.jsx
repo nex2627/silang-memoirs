@@ -1303,7 +1303,7 @@ function CrewPicker({people,value,onChange}){
     {groups.map(g=>g.people.length>0 && <div key={g.label} className="token-group"><div className="token-group-label">{g.label}</div>
       <div className="token-row">{g.people.map(p=>{ const on=!!value[p.id]; return <span key={p.id} className={`crew-item ${on?'on':''}`}>
         <button type="button" className={`token ${on?'active':''}`} onClick={()=>toggle(p.id)}>{p.full_name}</button>
-        {on && <span className="duty-pills">{DUTIES.map(([k,t],i)=><button type="button" key={k} title={t} style={{'--i':i}} className={(value[p.id]||[]).includes(k)?'on':''} onClick={()=>duty(p.id,k)}>{k}</button>)}</span>}
+        <span className="duty-pills" aria-hidden={!on}>{DUTIES.map(([k,t],i)=><button type="button" tabIndex={on?0:-1} key={k} title={t} style={{'--i':i}} className={(value[p.id]||[]).includes(k)?'on':''} onClick={()=>duty(p.id,k)}>{k}</button>)}</span>
       </span> })}</div></div>)}
     <div className="duty-legend">Duty (optional): <b>PM</b> Photo Main · <b>PC</b> Photo Creative · <b>VM</b> Video Main · <b>VC</b> Video Creative</div>
   </div>
