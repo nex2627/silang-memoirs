@@ -351,37 +351,31 @@ function Login({onLogin,theme,toggleTheme}){
 
 /* ---------------- Workspace shell ---------------- */
 // Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
-// Soft rubber-band at the top / bottom of a page. One requestAnimationFrame loop eases toward the pull, so it stays light.
+// Past the top / bottom of a page: one quick bounce + soft glow, played instantly (no tracking, so nothing can lag).
 function EdgeBounce(){
   const glow=useRef(null)
   useEffect(()=>{
-    const MAX=70; let target=0, cur=0, raf=0, timer=null, node=null, live=false, lock=0
+    let cool=0, acc=0, accT=null
     const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; return {top:y<=0,bot:y+window.innerHeight>=document.documentElement.scrollHeight-1} }
     const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
-    const frame=()=>{
-      cur+=(target-cur)*(target===0?0.38:0.45)
-      if(Math.abs(cur)<0.15&&target===0){ cur=0 }
-      if(node){ node.style.transform=cur?`translate3d(0,${cur.toFixed(2)}px,0)`:'' }
-      const g=glow.current; if(g){ const a=Math.min(1,Math.abs(cur)/MAX); g.style.opacity=a; g.style.transform=`translateY(${cur>0?'-':''}${(1-a)*30}px)`; g.className='edge-glow '+(cur>0?'top':'bot') }
-      if(cur||target){ raf=requestAnimationFrame(frame) } else { raf=0; live=false; if(node){ node.style.willChange=''; node.style.transform='' } if(g) g.style.opacity=0 }
+    function play(dir){   // dir: 'top' or 'bot'
+      if(Date.now()<cool) return; cool=Date.now()+700
+      const n=document.querySelector('.main > .content'); const g=glow.current
+      if(n&&n.animate){ const d=dir==='top'?1:-1; n.animate([{transform:'translate3d(0,0,0)'},{transform:`translate3d(0,${22*d}px,0)`,offset:.3},{transform:`translate3d(0,${-4*d}px,0)`,offset:.6},{transform:'translate3d(0,0,0)'}],{duration:500,easing:'cubic-bezier(.22,1,.36,1)'}) }
+      if(g){ g.className='edge-glow '+dir; void g.offsetWidth; g.classList.add('go'); setTimeout(()=>g.classList.remove('go'),560) }
     }
-    const kick=()=>{ if(!live){ live=true; node=document.querySelector('.main > .content'); if(node) node.style.willChange='transform' } if(!raf) raf=requestAnimationFrame(frame) }
-    const pull=d=>{ const room=1-Math.min(1,Math.abs(target)/MAX); target=Math.max(-MAX,Math.min(MAX,target+d*0.4*Math.max(.1,room))); kick() }
-    const release=()=>{ target=0; lock=Date.now()+350; kick() }
     const onWheel=e=>{
-      if(blocked(e.target)||Date.now()<lock) return   // trackpad momentum after letting go must not pull again
+      if(blocked(e.target)) return
       const {top,bot}=edge(); const dy=e.deltaY
-      if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)) return
-      if((top&&dy<0)||(bot&&dy>0)){ pull(-dy); clearTimeout(timer); timer=setTimeout(release,45) }
-      else if(target){ release() }
+      if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)){ return }
+      if((top&&dy<0)||(bot&&dy>0)){ acc+=Math.abs(dy); clearTimeout(accT); accT=setTimeout(()=>{ acc=0 },200); if(acc>14){ acc=0; play(top&&dy<0?'top':'bot') } } else acc=0
     }
     let ty=0, tOn=false
     const ts=e=>{ if(window.innerWidth>760||blocked(e.target)) return; ty=e.touches[0].clientY; tOn=edge().bot }
-    const tm=e=>{ if(!tOn) return; const dy=e.touches[0].clientY-ty; if(dy<0&&edge().bot){ target=Math.max(-MAX,dy*.4); kick() } else if(target){ release() } }
-    const te=()=>{ tOn=false; if(target) release() }
+    const tm=e=>{ if(!tOn) return; if(e.touches[0].clientY-ty<-24 && edge().bot){ tOn=false; play('bot') } }
     window.addEventListener('wheel',onWheel,{passive:true})
-    window.addEventListener('touchstart',ts,{passive:true}); window.addEventListener('touchmove',tm,{passive:true}); window.addEventListener('touchend',te); window.addEventListener('touchcancel',te)
-    return ()=>{ clearTimeout(timer); cancelAnimationFrame(raf); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm); window.removeEventListener('touchend',te); window.removeEventListener('touchcancel',te) }
+    window.addEventListener('touchstart',ts,{passive:true}); window.addEventListener('touchmove',tm,{passive:true})
+    return ()=>{ clearTimeout(accT); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm) }
   },[])
   return <div ref={glow} className="edge-glow bot" aria-hidden="true"/>
 }
