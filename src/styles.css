@@ -798,3 +798,9 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 @keyframes bounceBot{0%{transform:translate3d(0,0,0)}30%{transform:translate3d(0,-22px,0)}60%{transform:translate3d(0,4px,0)}100%{transform:translate3d(0,0,0)}}
 
 .edge-glow.go{animation:glowPulse .9s ease-in-out}
+
+/* Round 17: pull-to-refresh icon is always a perfect circle (also in dark mode) */
+.ptr{width:44px;height:44px}
+.ptr-orbit{width:44px!important;height:44px!important;min-width:44px;aspect-ratio:1/1;box-sizing:border-box;border-radius:50%!important;overflow:hidden;clip-path:circle(50%);background:#261e1a!important;border:2px solid var(--sand)!important;display:grid;place-items:center;backface-visibility:hidden}
+.ptr-orbit img{width:26px!important;height:26px!important;border-radius:50%;object-fit:contain;display:block}
+[data-theme=dark] .ptr-orbit{box-shadow:0 0 0 1px rgba(208,169,126,.35),0 8px 22px rgba(0,0,0,.55)}
