@@ -779,3 +779,11 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .hero-actions .sem-switch{align-self:center}
 @media(max-width:760px){.hero-actions{flex:1 1 100%;justify-content:space-between;align-self:stretch}.hero-actions .sem-switch{flex:0 1 auto}}
 .main>.content{will-change:auto}
+
+/* Round 15: soft blurred glow that grows at the edge you pull past (small layer, so it stays fast) */
+.main>.content{will-change:auto}
+.edge-glow{position:fixed;left:0;right:0;height:90px;pointer-events:none;opacity:0;z-index:40;filter:blur(18px)}
+.main-shift .edge-glow{left:0}
+.edge-glow.top{top:60px;background:radial-gradient(ellipse 60% 100% at 50% 0%,rgba(208,169,126,.55),transparent 70%)}
+.edge-glow.bot{bottom:0;background:radial-gradient(ellipse 60% 100% at 50% 100%,rgba(208,169,126,.55),transparent 70%)}
+@media(max-width:760px){.edge-glow.bot{bottom:64px}.edge-glow.top{top:56px}}
