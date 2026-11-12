@@ -796,3 +796,5 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .main>.content.bounce-bot{animation:bounceBot .5s cubic-bezier(.22,1,.36,1)}
 @keyframes bounceTop{0%{transform:translate3d(0,0,0)}30%{transform:translate3d(0,22px,0)}60%{transform:translate3d(0,-4px,0)}100%{transform:translate3d(0,0,0)}}
 @keyframes bounceBot{0%{transform:translate3d(0,0,0)}30%{transform:translate3d(0,-22px,0)}60%{transform:translate3d(0,4px,0)}100%{transform:translate3d(0,0,0)}}
+
+.edge-glow.go{animation:glowPulse .9s ease-in-out}
