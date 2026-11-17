@@ -9,6 +9,7 @@ import {
 
 } from 'lucide-react'
 
+/* ---------------- Config ---------------- */
 const ROLE_META = {
   admin:          { label:'Admin',        dept:null,           mode:'admin', head:false },
   eic:            { label:'EIC',          dept:'EDBO',         mode:'admin', head:false },
@@ -22,13 +23,16 @@ const ROLE_META = {
 }
 const DEPARTMENTS = ['Media','Colorist','Art Director']
 const DEPT_ICON = { Media:Camera, Colorist:Wand2, 'Art Director':LayoutDashboard }
+// EDBO positions you can pick when creating / editing an account -> the database role behind them.
 const EDBO_POSITIONS = [['EIC','eic'],['AEIC','aeic'],['TD','head_colorist'],['Finance','edbo'],['Art Director','art_director'],['Head Media','head_media'],['Head Layout','edbo'],['Head Researcher','edbo'],['Head Writer','edbo']]
 const ACCOUNT_GROUPS = ['Admin','EDBO','Media','Colorist']
+// What is stored in the database: only 4 roles. EDBO members are told apart by their Position.
 const DB_ROLE = { Admin:'admin', EDBO:'edbo', Media:'media', Colorist:'colorist' }
 const POS_ROLE = { 'eic':'eic', 'aeic':'aeic', 'td':'head_colorist', 'art director':'art_director', 'head media':'head_media' }
 const EDBO_ORDER = ['EIC','AEIC','TD','Finance','Art Director','Head Media','Head Layout','Head Researcher','Head Writer']
 const SECTION_ORDER = ['Admin','EDBO','Media','Colorist']
 const DUTIES = [['PM','Photo Main'],['PC','Photo Creative'],['VM','Video Main'],['VC','Video Creative']]
+// Open duty slots: the head says how many PM / PC / VM / VC spots an event has, members grab them (or the head assigns people).
 const slotsOf=s=>(s&&s.slots)||{}
 const dutyTaken=(s,d)=>(s.schedule_members||[]).filter(m=>(m.duties||[]).includes(d)).length
 const dutyLeft=(s,d)=>Math.max(0,(slotsOf(s)[d]||0)-dutyTaken(s,d))
@@ -40,21 +44,28 @@ const LOGO = `${import.meta.env.BASE_URL}logo.png`
 const EDITION = 'Nexemeral 27'
 const WELCOME_LINE = 'Keep every story, page, photograph and fact moving toward the finished yearbook.'
 const IDLE_LIMIT_MS = 3*60*1000
+// Pipeline: Media event sorted -> TD assigns colorgrading (self / Colorist / EDBO) -> all colorgraded -> Art Director makes the Facebook cover -> posted.
 const TD_STAGE = { dept:'Colorist', verb:'colorgrading', titlePrefix:'Colorgrading' }
 
+/* ---------------- Helpers ---------------- */
+// Database (role + position) -> the working role the screens use.
 function effRole(role,position){ if(role==='edbo') return POS_ROLE[String(position||'').trim().toLowerCase()]||'edbo'; if(role==='media') return 'staff_media'; if(role==='colorist') return 'staff_colorist'; return role }
 function normP(p){ if(!p) return p; const role=effRole(p.role,p.position); return {...p, dbRole:p.role, role, department:ROLE_META[role]?.dept||p.department} }
 async function fetchProfiles(){ const {data,error}=await supabase.from('profiles').select('*').order('full_name'); if(error) console.error(error); return (data||[]).map(normP) }
 async function fetchActive(){ return (await fetchProfiles()).filter(p=>p.active!==false) }
+// Directory order: Admin, then EDBO (EIC, AEIC, TD, Finance, Art Director, Head Media, Head Layout, Head Researcher, Head Writer), then Media, then Colorist.
 function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p.position||'').trim().toLowerCase()); if(i>=0) return i; const f={eic:0,aeic:1,head_colorist:2,art_director:4,head_media:5}[p.role]; return f??50 }
 function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
+// Semester filter: 2nd semester is what everyone sees by default; 1st semester is the imported archive, kept for checking.
 const SEM_OPTIONS=[['2','2nd semester'],['1','1st semester']]
 const inSem=(x,sem)=>sem==='all'||(x.semester??2)===Number(sem)
 const evHours=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
+// Switch for the top right of a page: 1st sem / 2nd sem / Both.
 function SemSwitch({value,onChange}){
   const opts=[['1','1st sem'],['2','2nd sem'],['all','Both']]; const i=Math.max(0,opts.findIndex(o=>o[0]===value))
   return <div className="sem-switch" role="tablist"><span className="sem-slider" style={{transform:`translateX(${i*100}%)`}}/>{opts.map(([v,l])=><button type="button" role="tab" aria-selected={value===v} key={v} className={value===v?'on':''} onClick={()=>onChange(v)}>{l}</button>)}</div>
 }
+// One box that always shows both semesters: total, 1st, 2nd and the split bar.
 function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
   const t=h1+h2; const p1=t?h1/t*100:0; const f=n=>unit==='hrs'?n.toFixed(1):String(n)
   const [go,setGo]=useState(false); useEffect(()=>{ const id=setTimeout(()=>setGo(true),80); return ()=>clearTimeout(id) },[])
@@ -67,8 +78,10 @@ function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
       <div className="sem-bar"><i style={{width:`${go?p1:0}%`,background:'#b2b6ae'}}/><i style={{width:`${go?100-p1:0}%`,background:'var(--sand)'}}/></div></div>
   </div>
 }
+// Everyone who covered an event: linked crew first, then names carried over from the old sheet.
 function mediaNames(e){ return [...(e.schedule_members||[]).map(m=>crewText(m)).filter(Boolean),...(e.legacy_media?[e.legacy_media]:[])].join(', ') }
 function colorNames(e,tasks){ return [...(tasks||[]).filter(t=>t.schedule_id===e.id&&t.department==='Colorist').map(t=>t.profiles?.full_name).filter(Boolean),...(e.legacy_colorist?[e.legacy_colorist]:[])].join(', ') }
+// Video-only crew (VM / VC) do not have to sort photos.
 function needsSort(m){ const d=m.duties||[]; return !(d.length && d.every(x=>x==='VM'||x==='VC')) }
 function isHead(role){ return !!ROLE_META[role]?.head }
 function isStaff(role){ return !!role && role.startsWith('staff_') }
@@ -90,10 +103,12 @@ function managedTaskDepts(role){ if(seesAll(role)) return ['Colorist','Art Direc
 function hasPostingTracker(role){ return isAdminLike(role) || isTD(role) || role==='art_director' || role==='head_media' }
 function crewText(m){ return `${m.profiles?.full_name||''}${(m.duties||[]).length?` · ${m.duties.join('/')}`:''}` }
 function initials(name=''){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase() }
+// One avatar everywhere: the uploaded photo when there is one, initials otherwise.
 function Avatar({url,name,cls='avatar'}){
   const [bad,setBad]=useState(false)
   return <span className={cls}>{url&&!bad?<img src={url} alt="" loading="lazy" onError={()=>setBad(true)} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover',display:'block'}}/>:initials(name)}</span>
 }
+// Segmented switch with a pill that glides to the selected option (also works when the buttons wrap).
 function Seg({value,options,onChange,className='seg-switch'}){
   const box=useRef(null); const [pill,setPill]=useState(null)
   const place=()=>{ const b=box.current?.querySelector('button.on'); if(b) setPill({x:b.offsetLeft,y:b.offsetTop,w:b.offsetWidth,h:b.offsetHeight}) }
@@ -109,6 +124,7 @@ function sameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()=
 function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
 function fmtDay(d,withYear=true){ if(!d) return '—'; const x=d instanceof Date?d:new Date(d.length===10?d+'T00:00:00':d); if(isNaN(x)) return '—'; return x.toLocaleDateString([], withYear?{weekday:'short',month:'short',day:'numeric',year:'numeric'}:{weekday:'short',month:'short',day:'numeric'}) }
 function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+// Button that stays neutral, lights up on hover, and turns green with a check once it has been pressed.
 function ActionButton({label,doneLabel,run,after,className=''}){
   const [st,setSt]=useState('idle')
   async function go(){ if(st!=='idle') return; setSt('busy'); let r; try{ r=await run() }catch(e){ r={error:e} } if(r&&r.error){ notifyDialog(r.error.message||'Something went wrong.'); setSt('idle'); return } setSt('done'); setTimeout(()=>{ after&&after() },750) }
@@ -117,6 +133,7 @@ function ActionButton({label,doneLabel,run,after,className=''}){
   </button>
 }
 function usePoll(fn,ms=30000){ const ref=useRef(fn); ref.current=fn; useEffect(()=>{ const t=setInterval(()=>ref.current(),ms); const vis=()=>{ if(document.visibilityState==='visible') ref.current() }; document.addEventListener('visibilitychange',vis); return ()=>{ clearInterval(t); document.removeEventListener('visibilitychange',vis) } },[]) }
+// ---- Date field: type the numbers (10/25/2026, 2026-10-25, 102526 …) or tap the calendar icon.
 function parseDateText(txt){
   const t=(txt||'').trim(); if(!t) return ''
   let y,m,d,mt
@@ -329,7 +346,7 @@ function Login({onLogin,theme,toggleTheme}){
       <form onSubmit={submit}>
         <label>ID number
           <div className="id-field">
-            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder=""/>
+            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder="e.g. 2051076"/>
             {email.trim() && !email.includes('@') && <div className="id-overlay" aria-hidden="true"><span className="id-mirror">{email}</span><span className="id-suffix">@aup.edu.ph</span></div>}
           </div>
         </label>
@@ -517,6 +534,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
           <NotificationBell profile={profile}/>
         </div>
       </header>
+      <AnnouncementTicker profile={profile} onOpen={()=>goPage('Notifications')}/>
       <div className={`content page-enter ${dir}`} key={page+String(deptFocus)}>
         {page==='Dashboard' && viewAll && <AdminDashboard profile={profile}/>}
         {page==='Dashboard' && !viewAll && mode==='hours' && <HoursDashboard profile={profile}/>}
@@ -613,13 +631,35 @@ function NotificationBell({profile}){
     {open && createPortal(<div className="notif-dropdown" ref={drop}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 6px 10px'}}><strong style={{fontSize:12}}>Notifications</strong>{rows.length>0 && <button className="text-btn" onClick={markAllRead}>Mark all read</button>}</div>
       {!rows.length && <div className="notif-empty"><BellOff size={20}/><span>You're all caught up.</span></div>}
-      {rows.map(r=><button key={r.id} className="notif-item unread" onClick={()=>markRead(r.id)}>
+      {rows.map(r=><button key={r.id} className={`notif-item unread ${r.kind==='announcement'?'announce':''}`} onClick={()=>markRead(r.id)}>
         <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
       </button>)}
     </div>,document.body)}
   </div>
 }
 
+// Running banner under the top bar: the viewer's recent announcements scroll across. Tap = open Notifications, X = hide until the next announcement.
+function AnnouncementTicker({profile,onOpen}){
+  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-ticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false)
+  async function load(){
+    const since=new Date(Date.now()-7*864e5).toISOString()
+    const {data}=await supabase.from('notifications').select('id,title,body,created_at').eq('user_id',profile.id).eq('kind','announcement').gte('created_at',since).order('created_at',{ascending:false}).limit(5)
+    setItems(data||[])
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load,60000)
+  const latest=items[0]?.id||''
+  if(!items.length || hidden===latest) return null
+  const clip=t=>t&&t.length>140?t.slice(0,137)+'…':t
+  const line=items.map(a=>`${a.title}${a.body?` — ${clip(a.body)}`:''}`)
+  const chars=line.join('').length
+  function close(e){ e.stopPropagation(); setClosing(true); setTimeout(()=>{ try{ sessionStorage.setItem('sm-ticker-x',latest) }catch{}; setHidden(latest) },420) }
+  const Track=({aria})=><span className="ticker-set" aria-hidden={aria}>{line.map((t,i)=><span className="ticker-item" key={i}>{t}<i className="ticker-dot"/></span>)}</span>
+  return <div className={`ticker ${closing?'closing':''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={e=>{ if(e.key==='Enter') onOpen() }} title="Open notifications">
+    <span className="ticker-tag"><Megaphone size={13}/> <b>Announcement</b></span>
+    <div className="ticker-view"><div className="ticker-track" style={{'--dur':`${Math.max(20,Math.round(chars*0.24))}s`}}><Track/><Track aria={true}/></div></div>
+    <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
+  </div>
+}
 function NotificationsPage({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   useEffect(()=>{ load() },[profile.id])
@@ -628,8 +668,8 @@ function NotificationsPage({profile}){
   return <div>
     <section className="page-head"><div><div className="eyebrow">STAY IN THE LOOP</div><h1>Notifications</h1><p>Every task, event, and announcement sent your way.</p></div></section>
     <div className="panel">
-      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
-        <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
+      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'} ${r.kind==='announcement'?'announce':''}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
+        {r.kind==='announcement' && <em className="notif-tag"><Megaphone size={11}/> Announcement</em>}<strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
       </div>)}
       {!loading && !rows.length && <div className="empty">Nothing here yet.</div>}
     </div>
@@ -832,7 +872,7 @@ function EventDetailModal({id,profile,onClose}){
       {s.description && <p className="detail-desc">{s.description}</p>}
       {s.legacy_media && <p className="detail-desc">Media: {s.legacy_media}</p>}
       {s.legacy_colorist && <p className="detail-desc">Colorist: {s.legacy_colorist}</p>}
-      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>MEDIAS</div>
+      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>THE CREW</div>
         <div className="crew-list">{s.schedule_members.map(m=><div className={`crew-person ${m.member_id===profile.id?'me':''}`} key={m.member_id}><Avatar cls="avatar sm" url={m.profiles?.avatar_url} name={m.profiles?.full_name||'?'}/><span>{m.profiles?.full_name}{m.member_id===profile.id?' (you)':''}</span>{(m.duties||[]).length>0 && <em className="duty-tag">{m.duties.join('/')}</em>}{needsSort(m) && s.status!=='completed' && <small className={m.sorted?'ok':''}>{m.sorted?'sorted ✓':'pending'}</small>}</div>)}</div></>}
       <DutyGrab sched={s} profile={profile} onChanged={load}/>
     </div>}
@@ -1108,7 +1148,7 @@ function HoursDashboard({profile}){
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>{new Date(next.start_at).toLocaleDateString([], {weekday:'long',month:'long',day:'numeric'})} • {fmtTime(next.start_at)}–{fmtTime(next.end_at)} ({Math.max(0,(new Date(next.end_at)-new Date(next.start_at))/3600000).toFixed(1)}h)</p>
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>Where: {next.location||'No location set'}</p>
       {next.description && <p style={{margin:'0 0 8px',color:'var(--text-dim)',fontSize:12}}>{next.description}</p>}
-      <div className="eyebrow" style={{margin:'10px 0 6px'}}>MEDIAS</div>
+      <div className="eyebrow" style={{margin:'10px 0 6px'}}>THE CREW</div>
       <div className="member-chips" style={{justifyContent:'flex-start'}}>{(next.schedule_members||[]).map(m=><span key={m.member_id} className={m.member_id===profile.id?'me':''}>{crewText(m)}{m.sorted?' ✓':''}{m.member_id===profile.id?' (you)':''}</span>)}</div>
     </div>}
     <div className="panel task-panel">
@@ -1263,8 +1303,8 @@ function useAssignees(){
 // The task's department follows who it is for: Art Director work stays "Art Director", everything else is colorgrading.
 function deptFromAssignee(members,id){ return members.find(m=>m.id===id)?.role==='art_director'?'Art Director':'Colorist' }
 
-function TaskModal({profile,onClose,onSaved}){
-  const [form,setForm]=useState({title:'Colorgrading',description:'',assignedIds:[],assigned_date:todayISO()})
+function TaskModal({profile,onClose,onSaved,initialDate}){
+  const [form,setForm]=useState({title:'Colorgrading',description:'',assignedIds:[],assigned_date:initialDate||todayISO()})
   const members=useAssignees(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault()
     if(!form.assignedIds.length){ notifyDialog('Pick who the task is for.'); return }
@@ -1339,7 +1379,10 @@ function CalendarPage({profile}){
   }
 
   function eventsOn(d){ return items.filter(e=>sameDay(e.date,d)) }
-  function pickDay(d){ const list=eventsOn(d); if(list.length) setSelected({date:d,items:list}) }
+  const canAddEvent=(effMode==='hours'||effMode==='all')&&canCreateSchedule(role), canAddTask=(effMode==='tasks'||effMode==='all')&&canCreateTask(role)
+  const [createDate,setCreateDate]=useState(null)
+  function pickDay(d){ const list=eventsOn(d); if(list.length||canAddEvent||canAddTask) setSelected({date:d,items:list}) }
+  function startCreate(kind){ const d=localISO(selected.date); setCreateDate(d); setSelected(null); if(kind==='event') setOpenSchedule(true); else setOpenTask(true) }
   function shiftMonth(n){ const d=new Date(month); d.setMonth(d.getMonth()+n); setMonth(d) }
   const monthLabel=month.toLocaleDateString([], {month:'long',year:'numeric'}); const today=new Date()
   const upcoming=items.filter(e=>{ const st=e.raw.status; return e.date>=new Date(today.getFullYear(),today.getMonth(),today.getDate()) && st!=='completed' && st!=='done' }).sort((a,b)=>a.date-b.date).slice(0,8)
@@ -1361,8 +1404,8 @@ function CalendarPage({profile}){
   return <div>
     <section className="page-head"><div><div className="eyebrow">PLANNING</div><h1>Team calendar</h1><p>{worker?'Your assigned schedule.':'Create and review events and tasks.'}</p></div>
       <div style={{display:'flex',gap:8}}>
-        {(effMode==='hours'||effMode==='all') && canCreateSchedule(role) && <button className="primary-btn" onClick={()=>setOpenSchedule(true)}><Plus size={17}/> New event</button>}
-        {(effMode==='tasks'||effMode==='all') && canCreateTask(role) && <button className="primary-btn" onClick={()=>setOpenTask(true)}><Plus size={17}/> New task</button>}
+        {(effMode==='hours'||effMode==='all') && canCreateSchedule(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenSchedule(true) }}><Plus size={17}/> New event</button>}
+        {(effMode==='tasks'||effMode==='all') && canCreateTask(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenTask(true) }}><Plus size={17}/> New task</button>}
       </div></section>
     <div className="panel calendar">
       <div className="cal-toolbar"><button className="icon-btn" onClick={()=>shiftMonth(-1)}><ChevronLeft size={16}/></button><strong>{monthLabel}</strong><button className="icon-btn" onClick={()=>shiftMonth(1)}><ChevronRight size={16}/></button>
@@ -1384,6 +1427,7 @@ function CalendarPage({profile}){
     </div>
     {selected && <Modal title={selected.date.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'})} onClose={()=>setSelected(null)}>
       {anyEditable && <Seg value={editMode?'e':'v'} onChange={v=>setEditMode(v==='e')} options={[['v',<><Eye size={13}/> View</>],['e',<><Pencil size={13}/> Edit</>]]}/>}
+      {selected.items.length===0 && <div className="empty" style={{padding:'18px 0 6px'}}>Nothing planned for this day yet.</div>}
       {selected.items.map(e=><div key={e.id} className="day-detail-row">
         <strong>{e.title}</strong>
         {e.type==='schedule' && <><span>{e.raw.department} • {fmtTime(e.raw.start_at)} – {fmtTime(e.raw.end_at)} ({Math.max(0,(new Date(e.raw.end_at)-new Date(e.raw.start_at))/3600000).toFixed(1)}h)</span>
@@ -1406,9 +1450,13 @@ function CalendarPage({profile}){
           {editMode && canEdit(e) && <button className="danger-btn" onClick={()=>deleteItem(e)}><Trash2 size={13}/> Delete</button>}
         </div>
       </div>)}
+      {(canAddEvent||canAddTask) && <div className="day-add">
+        {canAddEvent && <button type="button" className="primary-btn" onClick={()=>startCreate('event')}><Plus size={16}/> New event on this day</button>}
+        {canAddTask && <button type="button" className={canAddEvent?'secondary-btn':'primary-btn'} onClick={()=>startCreate('task')}><Plus size={16}/> New task on this day</button>}
+      </div>}
     </Modal>}
-    {openSchedule && <ScheduleModal profile={profile} onClose={()=>setOpenSchedule(false)} onSaved={load}/>}
-    {openTask && <TaskModal profile={profile} onClose={()=>setOpenTask(false)} onSaved={load}/>}
+    {openSchedule && <ScheduleModal profile={profile} initialDate={createDate} onClose={()=>setOpenSchedule(false)} onSaved={load}/>}
+    {openTask && <TaskModal profile={profile} initialDate={createDate} onClose={()=>setOpenTask(false)} onSaved={load}/>}
     {editItem?.type==='schedule' && <EditScheduleModal schedule={editItem.raw} onClose={()=>setEditItem(null)} onSaved={()=>{ load(); setSelected(null) }}/>}
     {editItem?.type==='task' && <EditTaskModal task={editItem.raw} onClose={()=>setEditItem(null)} onSaved={()=>{ load(); setSelected(null) }}/>}
   </div>
@@ -1434,6 +1482,7 @@ function SlotsPicker({value,onChange}){
   return <div className="slots-picker">
     <div className="slots-grid">{DUTIES.map(([d,t])=><div key={d} className="slot-step"><span className="ss-name"><b>{d}</b><small>{t}</small></span>
       <div className="stepper"><button type="button" onClick={()=>set(d,-1)} aria-label={`Fewer ${d}`}>−</button><em>{Number(value[d])||0}</em><button type="button" onClick={()=>set(d,1)} aria-label={`More ${d}`}>+</button></div></div>)}</div>
+    <div className="duty-legend">Spots members can grab on their own. Leave everything at 0 if you only want to assign people yourself — you can do both.</div>
   </div>
 }
 function useEventPeople(){
@@ -1442,8 +1491,8 @@ function useEventPeople(){
   return people
 }
 
-function ScheduleModal({profile,onClose,onSaved}){
-  const [form,setForm]=useState({title:'',description:'',location:'',date:todayISO(),start:'',end:'',crew:{},slots:{}})
+function ScheduleModal({profile,onClose,onSaved,initialDate}){
+  const [form,setForm]=useState({title:'',description:'',location:'',date:initialDate||todayISO(),start:'',end:'',crew:{},slots:{}})
   const people=useEventPeople(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault()
     if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
@@ -1720,16 +1769,16 @@ function Resources({profile}){
   }
   return <div>
     <section className="page-head"><div><div className="eyebrow">QUICK ACCESS</div><h1>Resources</h1><p>Photos, Canva, Drive and other team links — one tap away.</p></div>{can && <button className="primary-btn" onClick={()=>setOpen(true)}><Plus size={17}/> Add resource</button>}</section>
-    <div className="resource-grid">{rows.map(r=>r.image_url
-      ? <div className="resource-card panel photo" key={r.id}>
-          <button type="button" className="resource-photo" onClick={()=>setView(r)} title="Open photo"><img src={r.image_url} alt={r.name} loading="lazy"/></button>
-          <div className="resource-info"><div><h3>{r.name}</h3><p>{r.description||'Photo'}{r.url?' • has link':''}</p>{can && (r.audience||[]).length>0 && <span className="aud-badge">{audLabel(r.audience)}</span>}</div>
-            {can && <button className="icon-btn" onClick={()=>del(r)} title="Remove"><Trash2 size={14}/></button>}</div>
+    <div className="resource-grid">{rows.map(r=>{ const photo=!!r.image_url
+      const openIt=()=>{ if(photo) setView(r); else if(r.url) window.open(r.url,'_blank','noopener,noreferrer') }
+      return <div className="resource-card panel row" key={r.id} role="link" tabIndex={0} onClick={openIt} onKeyDown={e=>{ if(e.key==='Enter') openIt() }}>
+        <div className={`resource-thumb ${photo?'':'icon'}`}>{photo?<img src={r.image_url} alt="" loading="lazy"/>:<Link2 size={22}/>}</div>
+        <div className="resource-text"><h3>{r.name}</h3><p>{r.description||(photo?'Photo':r.resource_type)}{photo&&r.url?' • has link':''}</p>{can && (r.audience||[]).length>0 && <span className="aud-badge">{audLabel(r.audience)}</span>}</div>
+        <div className="resource-actions">
+          {!photo && <ExternalLink size={16} className="res-open"/>}
+          {can && <button type="button" className="icon-btn" onClick={e=>{ e.stopPropagation(); del(r) }} title="Remove">{photo?<Trash2 size={14}/>:<X size={15}/>}</button>}
         </div>
-      : <a className="resource-card panel" href={r.url} target="_blank" rel="noreferrer" key={r.id}>
-          <div className="resource-icon"><Link2 size={22}/></div><div><h3>{r.name}</h3><p>{r.description||r.resource_type}</p>{can && (r.audience||[]).length>0 && <span className="aud-badge">{audLabel(r.audience)}</span>}</div>
-          {can ? <button className="icon-btn" onClick={e=>{ e.preventDefault(); del(r) }}><X size={15}/></button> : <ExternalLink size={17}/>}
-        </a>)}</div>
+      </div> })}</div>
     {!rows.length && <div className="panel empty">No resources yet.{can?' Add a photo or a link above.':''}</div>}
     {view && <Modal title={view.name} onClose={()=>setView(null)}>
       <img className="resource-full" src={view.image_url} alt={view.name}/>
