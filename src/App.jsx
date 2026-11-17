@@ -832,7 +832,7 @@ function EventDetailModal({id,profile,onClose}){
       {s.description && <p className="detail-desc">{s.description}</p>}
       {s.legacy_media && <p className="detail-desc">Media: {s.legacy_media}</p>}
       {s.legacy_colorist && <p className="detail-desc">Colorist: {s.legacy_colorist}</p>}
-      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>THE CREW</div>
+      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>MEDIAS</div>
         <div className="crew-list">{s.schedule_members.map(m=><div className={`crew-person ${m.member_id===profile.id?'me':''}`} key={m.member_id}><Avatar cls="avatar sm" url={m.profiles?.avatar_url} name={m.profiles?.full_name||'?'}/><span>{m.profiles?.full_name}{m.member_id===profile.id?' (you)':''}</span>{(m.duties||[]).length>0 && <em className="duty-tag">{m.duties.join('/')}</em>}{needsSort(m) && s.status!=='completed' && <small className={m.sorted?'ok':''}>{m.sorted?'sorted ✓':'pending'}</small>}</div>)}</div></>}
       <DutyGrab sched={s} profile={profile} onChanged={load}/>
     </div>}
@@ -1108,7 +1108,7 @@ function HoursDashboard({profile}){
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>{new Date(next.start_at).toLocaleDateString([], {weekday:'long',month:'long',day:'numeric'})} • {fmtTime(next.start_at)}–{fmtTime(next.end_at)} ({Math.max(0,(new Date(next.end_at)-new Date(next.start_at))/3600000).toFixed(1)}h)</p>
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>Where: {next.location||'No location set'}</p>
       {next.description && <p style={{margin:'0 0 8px',color:'var(--text-dim)',fontSize:12}}>{next.description}</p>}
-      <div className="eyebrow" style={{margin:'10px 0 6px'}}>THE CREW</div>
+      <div className="eyebrow" style={{margin:'10px 0 6px'}}>MEDIAS</div>
       <div className="member-chips" style={{justifyContent:'flex-start'}}>{(next.schedule_members||[]).map(m=><span key={m.member_id} className={m.member_id===profile.id?'me':''}>{crewText(m)}{m.sorted?' ✓':''}{m.member_id===profile.id?' (you)':''}</span>)}</div>
     </div>}
     <div className="panel task-panel">
