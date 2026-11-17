@@ -329,7 +329,7 @@ function Login({onLogin,theme,toggleTheme}){
       <form onSubmit={submit}>
         <label>ID number
           <div className="id-field">
-            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder="e.g. 2051076"/>
+            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder=""/>
             {email.trim() && !email.includes('@') && <div className="id-overlay" aria-hidden="true"><span className="id-mirror">{email}</span><span className="id-suffix">@aup.edu.ph</span></div>}
           </div>
         </label>
