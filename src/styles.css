@@ -804,3 +804,93 @@ html.scrolled .topbar{box-shadow:0 8px 22px rgba(38,30,26,.09)}
 .ptr-orbit{width:44px!important;height:44px!important;min-width:44px;aspect-ratio:1/1;box-sizing:border-box;border-radius:50%!important;overflow:hidden;clip-path:circle(50%);background:#261e1a!important;border:2px solid var(--sand)!important;display:grid;place-items:center;backface-visibility:hidden}
 .ptr-orbit img{width:26px!important;height:26px!important;border-radius:50%;object-fit:contain;display:block}
 [data-theme=dark] .ptr-orbit{box-shadow:0 0 0 1px rgba(208,169,126,.35),0 8px 22px rgba(0,0,0,.55)}
+
+/* Round 18: iPhone safe areas (notch / Dynamic Island / home bar) + fit sizing */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.app,.main,.center-screen{min-height:100dvh}
+@supports(-webkit-touch-callout:none){.app,.main,.center-screen{min-height:-webkit-fill-available}}
+.center-screen{padding-top:calc(24px + env(safe-area-inset-top));padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.theme-toggle-floating{top:calc(24px + env(safe-area-inset-top))}
+.ptr{top:env(safe-area-inset-top)}
+@media(max-width:760px){
+  .topbar{height:calc(64px + env(safe-area-inset-top))!important;padding-top:env(safe-area-inset-top)!important;padding-left:max(12px,env(safe-area-inset-left))!important;padding-right:max(12px,env(safe-area-inset-right))!important;box-sizing:border-box}
+  .mobile-tabbar{height:calc(64px + env(safe-area-inset-bottom))!important;padding-bottom:env(safe-area-inset-bottom)!important;box-sizing:border-box}
+  .main,.main.sidebar-collapsed{padding-bottom:calc(74px + env(safe-area-inset-bottom))!important}
+  .content{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+  input,select,textarea,.filter-select,.select-btn{font-size:16px!important}   /* stops Safari zooming in on fields */
+  .edge-glow.bot{bottom:calc(64px + env(safe-area-inset-bottom))}
+}
+/* Login: @aup.edu.ph follows the ID number automatically */
+.id-field{position:relative}
+.id-overlay{position:absolute;inset:0;display:flex;align-items:center;padding:0 14px;pointer-events:none;overflow:hidden;font-family:inherit;font-size:13px;white-space:pre}
+@media(max-width:760px){.id-overlay{font-size:16px}}
+.id-mirror{color:transparent;max-width:100%}
+.id-suffix{color:var(--text-dim);opacity:.8;margin-left:1px}
+
+/* Round 18b: calendar fits the page, event details, open duties, audience picker */
+.clickable{cursor:pointer;transition:background .2s,transform .2s}
+.task-row.clickable:hover,.table-row.clickable:hover{background:var(--surface-2)}
+.task-row.clickable:active,.table-row.clickable:active{transform:scale(.995)}
+.clickable-panel{cursor:pointer}
+.tap-hint{font-size:10px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-dim)}
+.panel-sub{margin:-6px 0 10px;font-size:12px;color:var(--text-dim)}
+.detail-body{display:grid;gap:4px}
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;padding:4px 0 6px}
+.detail-grid small{display:block;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:3px;font-weight:700}
+.detail-grid b{font-size:13px;color:var(--text);font-weight:600}
+.detail-grid .with-av{display:flex;align-items:center;gap:8px}
+.detail-desc{margin:8px 0 0;font-size:12px;color:var(--text-dim);line-height:1.6}
+.crew-list{display:grid;gap:8px}
+.crew-person{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--text);padding:8px 10px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
+.crew-person.me{border-color:var(--sand)}
+.crew-person small{margin-left:auto;font-size:10px;color:var(--text-dim)}.crew-person small.ok{color:#5f9e72}
+.crew-person .avatar.sm{flex-shrink:0}
+@media(max-width:520px){.detail-grid{grid-template-columns:1fr}}
+.duty-grab{margin-top:14px}
+.duty-slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px;margin-top:8px}
+.duty-slot{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2);transition:border-color .3s,background .3s,opacity .3s}
+.duty-slot.mine{border-color:var(--sand);background:color-mix(in srgb,var(--sand) 12%,var(--surface))}
+.duty-slot.full:not(.mine){opacity:.55}
+.ds-name{display:grid;flex:1;min-width:0}.ds-name b{font-size:13px;color:var(--text)}.ds-name small{font-size:10px;color:var(--text-dim)}
+.slot-count{font-size:11px;font-weight:700;color:var(--text-dim);font-variant-numeric:tabular-nums}
+.slot-you{font-size:9px;letter-spacing:.8px;text-transform:uppercase;color:var(--sand);font-weight:700}
+.duty-events{display:grid;gap:14px}
+.duty-event{padding-top:12px;border-top:1px solid var(--border)}.duty-event:first-child{border-top:0;padding-top:0}
+.duty-event-head{display:grid;gap:3px;text-align:left;background:none;border:0;padding:0;color:inherit;font:inherit;cursor:pointer;width:100%}
+.duty-event-head strong{font-size:14px;color:var(--text)}.duty-event-head span{font-size:11px;color:var(--text-dim)}
+.duty-event .duty-grab{margin-top:8px}.duty-event .eyebrow{display:none}
+.slots-picker{margin-bottom:14px}
+.slots-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.slot-step{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 11px;border:1px solid var(--border);border-radius:12px;background:var(--surface-2)}
+.ss-name{display:grid}.ss-name b{font-size:13px;color:var(--text)}.ss-name small{font-size:10px;color:var(--text-dim)}
+.stepper{display:flex;align-items:center;gap:4px}
+.stepper button{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:16px;line-height:1;display:grid;place-items:center;transition:transform .2s,background .2s}
+.stepper button:active{transform:scale(.88);background:var(--sand);color:#261e1a}
+.stepper em{min-width:22px;text-align:center;font-style:normal;font-weight:700;font-size:13px;color:var(--text);font-variant-numeric:tabular-nums}
+@media(max-width:420px){.slots-grid{grid-template-columns:1fr}}
+.aud-picker{margin-bottom:14px}.aud-row{display:flex;flex-wrap:wrap;gap:7px}
+.aud-people{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s var(--ease,cubic-bezier(.22,1,.36,1)),opacity .35s;opacity:0}
+.aud-people>div{overflow:hidden;min-height:0}
+.aud-people.open{grid-template-rows:1fr;opacity:1;margin-top:12px}
+.aud-badge{display:inline-block;margin-top:6px;font-size:9px;letter-spacing:.8px;text-transform:uppercase;padding:3px 8px;border-radius:999px;background:rgba(208,169,126,.2);color:var(--text)}
+@media(min-width:761px){
+  .calendar{height:calc(100dvh - 292px);min-height:430px;display:flex;flex-direction:column}
+  .calendar-grid{flex:1;min-height:0;grid-template-rows:repeat(6,minmax(0,1fr))}
+  .day{min-height:0;overflow:hidden;padding:6px 8px;gap:4px}
+  .day span{padding:3px 6px}
+}
+
+/* Round 18c: Avatar is a <span>, so keep generic "span" rules from touching it */
+.mobile-account .avatar,.profile-mini .avatar,.act-row .avatar,.person-head .avatar,.crew-person .avatar{display:grid!important;place-items:center;color:var(--ink)!important;font-size:11px;letter-spacing:0!important;text-transform:uppercase}
+.mobile-account .avatar{width:32px;height:32px;font-size:10px}
+.crew-person .avatar.sm,.act-row .avatar.sm,.person-head .avatar.sm{width:28px;height:28px;font-size:10px}
+
+/* Round 19: claimed names under each duty */
+.duty-slot{flex-direction:column;align-items:stretch;gap:8px}
+.ds-top{display:flex;align-items:center;gap:10px}
+.ds-holders{display:flex;flex-wrap:wrap;gap:6px}
+.holder{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:4px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text);animation:holderIn .45s var(--ease,cubic-bezier(.22,1,.36,1)) backwards}
+.holder.me{border-color:var(--sand);font-weight:600}
+.holder-x{border:0;background:none;color:var(--text-dim);font-size:15px;line-height:1;padding:0 0 0 2px;cursor:pointer;transition:color .2s,transform .2s}
+.holder-x:hover{color:#c0584d;transform:scale(1.2)}
+@keyframes holderIn{from{opacity:0;transform:translateY(4px) scale(.9)}to{opacity:1;transform:none}}
