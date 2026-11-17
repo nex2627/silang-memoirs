@@ -1434,7 +1434,6 @@ function SlotsPicker({value,onChange}){
   return <div className="slots-picker">
     <div className="slots-grid">{DUTIES.map(([d,t])=><div key={d} className="slot-step"><span className="ss-name"><b>{d}</b><small>{t}</small></span>
       <div className="stepper"><button type="button" onClick={()=>set(d,-1)} aria-label={`Fewer ${d}`}>−</button><em>{Number(value[d])||0}</em><button type="button" onClick={()=>set(d,1)} aria-label={`More ${d}`}>+</button></div></div>)}</div>
-    <div className="duty-legend">Spots members can grab on their own. Leave everything at 0 if you only want to assign people yourself — you can do both.</div>
   </div>
 }
 function useEventPeople(){
