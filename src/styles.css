@@ -909,6 +909,7 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .resource-actions{display:flex;align-items:center;gap:8px;flex:none;color:var(--text-dim)}
 @media(max-width:760px){.resource-grid{grid-template-columns:1fr}}
 
+
 /* Round 20: running announcement banner under the top bar */
 .ticker{display:flex;align-items:center;gap:12px;height:40px;padding:0 34px;background:linear-gradient(90deg,rgba(208,169,126,.28),rgba(208,169,126,.12));border-bottom:1px solid var(--border);cursor:pointer;overflow:hidden;animation:tickerIn .7s var(--ease,cubic-bezier(.22,1,.36,1)) backwards;transition:height .42s var(--ease,ease),opacity .35s;position:relative}
 .ticker.closing{height:0;opacity:0;border-bottom-width:0}
