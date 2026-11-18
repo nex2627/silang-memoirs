@@ -58,6 +58,8 @@ function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p
 function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
 // Semester filter: 2nd semester is what everyone sees by default; 1st semester is the imported archive, kept for checking.
 const SEM_OPTIONS=[['2','2nd semester'],['1','1st semester']]
+// 1st-semester period (admin setting): month/day range that repeats every year. Returns 1 or 2, or undefined when no period is set.
+function semFor(iso,p){ if(!p||!p.from||!p.to||!iso) return undefined; const md=String(iso).slice(5,10); const inside=p.from<=p.to?(md>=p.from&&md<=p.to):(md>=p.from||md<=p.to); return inside?1:2 }
 const inSem=(x,sem)=>sem==='all'||(x.semester??2)===Number(sem)
 const evHours=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
 // Switch for the top right of a page: 1st sem / 2nd sem / Both.
@@ -424,11 +426,13 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   const peekL=useRef(null), peekR=useRef(null)
   const [semDef,setSemDef]=useState({edbo:'2',head:'2',staff:'2'})
   const [loginMode,setLoginMode]=useState('session')
+  const [semPeriod,setSemPeriod]=useState(null)
   async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value}))
-    const {data:lm}=await supabase.from('app_settings').select('value').eq('key','login_mode').maybeSingle(); const m=lm?.value?.mode==='remember'?'remember':'session'; setLoginMode(m); applyLoginMode(m) }
+    const {data:lm}=await supabase.from('app_settings').select('value').eq('key','login_mode').maybeSingle(); const m=lm?.value?.mode==='remember'?'remember':'session'; setLoginMode(m); applyLoginMode(m)
+    const {data:sp}=await supabase.from('app_settings').select('value').eq('key','sem1_period').maybeSingle(); setSemPeriod(sp?.value?.from&&sp?.value?.to?{from:sp.value.from,to:sp.value.to}:null) }
   useEffect(()=>{ loadSettings() },[])  // eslint-disable-line
   usePoll(loadSettings,60000)
-  const settings=useMemo(()=>({ sem:semDef, loginMode, saveLogin:async mode=>{ setLoginMode(mode); applyLoginMode(mode); const {error}=await supabase.from('app_settings').upsert({key:'login_mode',value:{mode},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message) }, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,loginMode,profile.id])
+  const settings=useMemo(()=>({ sem:semDef, loginMode, semPeriod, saveSemPeriod:async p=>{ setSemPeriod(p); const {error}=await supabase.from('app_settings').upsert({key:'sem1_period',value:p||{},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message); return !error }, saveLogin:async mode=>{ setLoginMode(mode); applyLoginMode(mode); const {error}=await supabase.from('app_settings').upsert({key:'login_mode',value:{mode},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message) }, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,loginMode,semPeriod,profile.id])
   const [detail,setDetail]=useState(null)
   const detailApi=useMemo(()=>({openEvent:id=>setDetail({kind:'event',id}),openTask:id=>setDetail({kind:'task',id})}),[])
   const [allowCopy,setAllowCopy]=useState(false); const canCopy=role==='admin'&&allowCopy
@@ -473,7 +477,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
   const swipe=useRef({}); swipe.current={nav,page,goPage}
   useEffect(()=>{
     let x0=0,y0=0,ok=false,mode=null,el=null
-    const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar')) return true
+    const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar,.calendar-grid')) return true
       for(let n=t;n&&n!==document.body;n=n.parentElement){ if(n.scrollWidth>n.clientWidth+4){ const ox=getComputedStyle(n).overflowX; if(ox==='auto'||ox==='scroll') return true } } return false }
     const idx=()=>{ const {nav,page}=swipe.current; return nav.findIndex(n=>n[0]===page) }
     const start=e=>{ if(el){ el.style.transform=''; el.style.opacity=''; el.style.transition=''; el.style.willChange='' } ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); mode=null; x0=e.touches[0].clientX; y0=e.touches[0].clientY; el=document.querySelector('.content') }
@@ -534,7 +538,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
           <NotificationBell profile={profile}/>
         </div>
       </header>
-      <AnnouncementTicker profile={profile} onOpen={()=>goPage('Notifications')}/>
+      <AnnouncementTicker profile={profile}/>
       <div className={`content page-enter ${dir}`} key={page+String(deptFocus)}>
         {page==='Dashboard' && viewAll && <AdminDashboard profile={profile}/>}
         {page==='Dashboard' && !viewAll && mode==='hours' && <HoursDashboard profile={profile}/>}
@@ -631,22 +635,23 @@ function NotificationBell({profile}){
     {open && createPortal(<div className="notif-dropdown" ref={drop}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 6px 10px'}}><strong style={{fontSize:12}}>Notifications</strong>{rows.length>0 && <button className="text-btn" onClick={markAllRead}>Mark all read</button>}</div>
       {!rows.length && <div className="notif-empty"><BellOff size={20}/><span>You're all caught up.</span></div>}
-      {rows.map(r=><button key={r.id} className={`notif-item unread ${r.kind==='announcement'?'announce':''}`} onClick={()=>markRead(r.id)}>
+      {rows.map(r=><button key={r.id} className={`notif-item unread`} onClick={()=>markRead(r.id)}>
         <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
       </button>)}
     </div>,document.body)}
   </div>
 }
 
-// Running banner under the top bar: the viewer's recent announcements scroll across. Tap = open Notifications, X = hide until the next announcement.
-function AnnouncementTicker({profile,onOpen}){
-  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-ticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false)
+// Running banner under the top bar. Reads the announcements table directly (not notifications). Tap = read them in a popup, X = hide until the next one.
+function forMe(a,profile){ return a.audience==='all'||(a.audience==='heads'&&isHead(profile.role))||(a.audience==='staff'&&isStaff(profile.role))||(a.audience==='custom'&&(a.target_user_ids||[]).includes(profile.id))||a.sender_id===profile.id||isAdminLike(profile.role) }
+function AnnouncementTicker({profile}){
+  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-ticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false); const [open,setOpen]=useState(false)
   async function load(){
     const since=new Date(Date.now()-7*864e5).toISOString()
-    const {data}=await supabase.from('notifications').select('id,title,body,created_at').eq('user_id',profile.id).eq('kind','announcement').gte('created_at',since).order('created_at',{ascending:false}).limit(5)
-    setItems(data||[])
+    const {data}=await supabase.from('announcements').select('id,title,body,audience,target_user_ids,sender_id,created_at').gte('created_at',since).order('created_at',{ascending:false}).limit(20)
+    setItems((data||[]).filter(a=>forMe(a,profile)).slice(0,5))
   }
-  useEffect(()=>{ load() },[profile.id]); usePoll(load,60000)
+  useEffect(()=>{ load() },[profile.id]); usePoll(load,60000)  // eslint-disable-line
   const latest=items[0]?.id||''
   if(!items.length || hidden===latest) return null
   const clip=t=>t&&t.length>140?t.slice(0,137)+'…':t
@@ -654,11 +659,13 @@ function AnnouncementTicker({profile,onOpen}){
   const chars=line.join('').length
   function close(e){ e.stopPropagation(); setClosing(true); setTimeout(()=>{ try{ sessionStorage.setItem('sm-ticker-x',latest) }catch{}; setHidden(latest) },420) }
   const Track=({aria})=><span className="ticker-set" aria-hidden={aria}>{line.map((t,i)=><span className="ticker-item" key={i}>{t}<i className="ticker-dot"/></span>)}</span>
-  return <div className={`ticker ${closing?'closing':''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={e=>{ if(e.key==='Enter') onOpen() }} title="Open notifications">
+  return <><div className={`ticker ${closing?'closing':''}`} role="button" tabIndex={0} onClick={()=>setOpen(true)} onKeyDown={e=>{ if(e.key==='Enter') setOpen(true) }} title="Read announcements">
     <span className="ticker-tag"><Megaphone size={13}/> <b>Announcement</b></span>
     <div className="ticker-view"><div className="ticker-track" style={{'--dur':`${Math.max(20,Math.round(chars*0.24))}s`}}><Track/><Track aria={true}/></div></div>
     <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
   </div>
+  {open && <Modal title="Announcements" onClose={()=>setOpen(false)}><div className="ann-list">{items.map(a=><div className="ann-item" key={a.id}><strong>{a.title}</strong>{a.body && <p>{a.body}</p>}<small>{new Date(a.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div>)}</div></Modal>}
+  </>
 }
 function NotificationsPage({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
@@ -668,8 +675,8 @@ function NotificationsPage({profile}){
   return <div>
     <section className="page-head"><div><div className="eyebrow">STAY IN THE LOOP</div><h1>Notifications</h1><p>Every task, event, and announcement sent your way.</p></div></section>
     <div className="panel">
-      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'} ${r.kind==='announcement'?'announce':''}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
-        {r.kind==='announcement' && <em className="notif-tag"><Megaphone size={11}/> Announcement</em>}<strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
+      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
+        <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
       </div>)}
       {!loading && !rows.length && <div className="empty">Nothing here yet.</div>}
     </div>
@@ -747,8 +754,40 @@ function ControlCenter(){
     <p className="cc-note">Choose how long people stay logged in. This applies to everyone, and takes effect the next time they open the app.</p>
     <div className="cc-row"><div><strong>Stay logged in?</strong><span>{ctx.loginMode==='remember'?'Remember me: people stay signed in on their device until they log out.':'Log in every visit: closing the tab or app signs people out.'}</span></div>
       <Seg value={ctx.loginMode||'session'} onChange={v=>ctx.saveLogin(v)} options={[['session','Log in every visit'],['remember','Remember me']]}/></div>
+    <SemPeriod/>
     <SheetLinks/>
   </div>
+}
+const DAYS_IN=[31,29,31,30,31,30,31,31,30,31,30,31]
+function SemPeriod(){
+  const ctx=useContext(SettingsCtx); const p=ctx.semPeriod
+  const parse=v=>v?{m:Number(v.slice(0,2)),d:Number(v.slice(3,5))}:{m:8,d:1}
+  const [f,setF]=useState(parse(p?.from)), [t,setT]=useState(parse(p?.to||'12-31')); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState('')
+  useEffect(()=>{ if(p){ setF(parse(p.from)); setT(parse(p.to)) } },[p?.from,p?.to])  // eslint-disable-line
+  const pad=n=>String(n).padStart(2,'0'); const val=x=>`${pad(x.m)}-${pad(x.d)}`
+  const fix=x=>({...x,d:Math.min(x.d,DAYS_IN[x.m-1])})
+  const Pick=({v,set})=><span className="sp-pick"><Select value={String(v.m)} onChange={e=>set(fix({...v,m:Number(e.target.value)}))}>{MONTHS.map((n,i)=><option key={n} value={String(i+1)}>{n}</option>)}</Select><Select value={String(v.d)} onChange={e=>set({...v,d:Number(e.target.value)})}>{Array.from({length:DAYS_IN[v.m-1]},(_,i)=><option key={i} value={String(i+1)}>{String(i+1)}</option>)}</Select></span>
+  const lbl=x=>`${MONTHS[x.m-1]} ${x.d}`
+  async function save(){ setBusy(true); const ok=await ctx.saveSemPeriod({from:val(f),to:val(t)}); setBusy(false); if(ok){ setMsg('Saved'); setTimeout(()=>setMsg(''),1800) } }
+  async function clear(){ setBusy(true); await ctx.saveSemPeriod(null); setBusy(false) }
+  async function apply(){
+    if(!p){ notifyDialog('Save a period first.'); return }
+    if(!(await confirmDialog({title:'Apply to existing events & tasks?',body:`Everything dated ${lbl(parse(p.from))} → ${lbl(parse(p.to))} becomes 1st semester, the rest becomes 2nd semester. This re-tags all current events and tasks.`,confirmLabel:'Apply'}))) return
+    setBusy(true); const {data,error}=await supabase.rpc('apply_sem_period'); setBusy(false)
+    if(error) notifyDialog(error.message.includes('apply_sem_period')?'Run supabase/sem-period.sql in the Supabase SQL editor first.':error.message); else notifyDialog(`Done — ${data?.events??0} events and ${data?.tasks??0} tasks updated.`)
+  }
+  return <>
+    <div className="panel-title" style={{marginTop:26}}><h2>1st semester period</h2></div>
+    <p className="cc-note">Set when the 1st semester runs (month and day). New and edited events and tasks inside this range are tagged 1st semester automatically; everything else is 2nd semester. It repeats every year.</p>
+    <div className="cc-row sp-row"><div><strong>From</strong><span>First day of the 1st semester</span></div><Pick v={f} set={setF}/></div>
+    <div className="cc-row sp-row"><div><strong>To</strong><span>Last day of the 1st semester</span></div><Pick v={t} set={setT}/></div>
+    <div className="sp-actions">
+      <button type="button" className="primary-btn" disabled={busy} onClick={save}>{msg||'Save period'}</button>
+      <button type="button" className="secondary-btn" disabled={busy||!p} onClick={apply}>Apply to existing</button>
+      {p && <button type="button" className="secondary-btn" disabled={busy} onClick={clear}>Clear</button>}
+    </div>
+    <p className="cc-note" style={{marginTop:8}}>{p?`Current: ${lbl(parse(p.from))} → ${lbl(parse(p.to))}`:'No period set — new items default to 2nd semester.'}</p>
+  </>
 }
 // Admin-only: every Google Sheet backup link lives here. Everyone else just gets the "Check Google Sheet" button.
 function SheetLinks(){
@@ -1304,12 +1343,13 @@ function useAssignees(){
 function deptFromAssignee(members,id){ return members.find(m=>m.id===id)?.role==='art_director'?'Art Director':'Colorist' }
 
 function TaskModal({profile,onClose,onSaved,initialDate}){
+  const sp=useContext(SettingsCtx).semPeriod
   const [form,setForm]=useState({title:'Colorgrading',description:'',assignedIds:[],assigned_date:initialDate||todayISO()})
   const members=useAssignees(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault()
     if(!form.assignedIds.length){ notifyDialog('Pick who the task is for.'); return }
     setBusy(true)
-    const {error}=await supabase.from('tasks').insert({ title:form.title, description:form.description||null, department:deptFromAssignee(members,form.assignedIds[0]), assigned_to:form.assignedIds[0], assigned_date:form.assigned_date||todayISO(), created_by:profile.id })
+    const {error}=await supabase.from('tasks').insert({ title:form.title, description:form.description||null, department:deptFromAssignee(members,form.assignedIds[0]), assigned_to:form.assignedIds[0], assigned_date:form.assigned_date||todayISO(), created_by:profile.id, ...(semFor(form.assigned_date||todayISO(),sp)?{semester:semFor(form.assigned_date||todayISO(),sp)}:{}) })
     setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
   }
   return <Modal title="Create task" onClose={onClose}><form onSubmit={save}>
@@ -1323,10 +1363,11 @@ function TaskModal({profile,onClose,onSaved,initialDate}){
 }
 
 function EditTaskModal({task,onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
   const [form,setForm]=useState({title:task.title,description:task.description||'',assignedIds:task.assigned_to?[task.assigned_to]:[],assigned_date:task.assigned_date||todayISO()})
   const members=useAssignees(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault(); setBusy(true)
-    const patch={ title:form.title, description:form.description||null, assigned_to:form.assignedIds[0]||null, assigned_date:form.assigned_date||null }
+    const patch={ title:form.title, description:form.description||null, assigned_to:form.assignedIds[0]||null, assigned_date:form.assigned_date||null, ...(semFor(form.assigned_date,sp)?{semester:semFor(form.assigned_date,sp)}:{}) }
     if(form.assignedIds[0] && form.assignedIds[0]!==task.assigned_to) patch.department=deptFromAssignee(members,form.assignedIds[0])
     const {error}=await supabase.from('tasks').update(patch).eq('id',task.id)
     setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
@@ -1381,9 +1422,16 @@ function CalendarPage({profile}){
   function eventsOn(d){ return items.filter(e=>sameDay(e.date,d)) }
   const canAddEvent=(effMode==='hours'||effMode==='all')&&canCreateSchedule(role), canAddTask=(effMode==='tasks'||effMode==='all')&&canCreateTask(role)
   const [createDate,setCreateDate]=useState(null)
-  function pickDay(d){ const list=eventsOn(d); if(list.length||canAddEvent||canAddTask) setSelected({date:d,items:list}) }
+  function pickDay(d){ const list=eventsOn(d)
+    if(!list.length && (canAddEvent!==canAddTask)){ setCreateDate(localISO(d)); if(canAddEvent) setOpenSchedule(true); else setOpenTask(true); return }   // empty day + only one thing to create: open it straight away
+    if(list.length||canAddEvent||canAddTask) setSelected({date:d,items:list}) }
   function startCreate(kind){ const d=localISO(selected.date); setCreateDate(d); setSelected(null); if(kind==='event') setOpenSchedule(true); else setOpenTask(true) }
-  function shiftMonth(n){ const d=new Date(month); d.setMonth(d.getMonth()+n); setMonth(d) }
+  const gridRef=useRef(null), slideDir=useRef(0), swp=useRef(null), wheelAt=useRef(0)
+  function shiftMonth(n){ slideDir.current=n; const d=new Date(month); d.setMonth(d.getMonth()+n); setMonth(d) }
+  useEffect(()=>{ const g=gridRef.current; const n=slideDir.current; slideDir.current=0; if(g&&n&&g.animate) g.animate([{opacity:0,transform:`translateX(${n*38}px)`},{opacity:1,transform:'translateX(0)'}],{duration:420,easing:'cubic-bezier(.22,1,.36,1)'}) },[month])
+  const onTS=e=>{ if(e.touches.length===1) swp.current={x:e.touches[0].clientX,y:e.touches[0].clientY,t:Date.now()} }
+  const onTE=e=>{ const a=swp.current; swp.current=null; if(!a) return; const dx=e.changedTouches[0].clientX-a.x, dy=e.changedTouches[0].clientY-a.y; if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4) shiftMonth(dx<0?1:-1) }
+  const onWheelCal=e=>{ if(Math.abs(e.deltaX)>Math.abs(e.deltaY)*1.2 && Math.abs(e.deltaX)>18 && Date.now()-wheelAt.current>650){ wheelAt.current=Date.now(); shiftMonth(e.deltaX>0?1:-1) } }
   const monthLabel=month.toLocaleDateString([], {month:'long',year:'numeric'}); const today=new Date()
   const upcoming=items.filter(e=>{ const st=e.raw.status; return e.date>=new Date(today.getFullYear(),today.getMonth(),today.getDate()) && st!=='completed' && st!=='done' }).sort((a,b)=>a.date-b.date).slice(0,8)
 
@@ -1407,11 +1455,11 @@ function CalendarPage({profile}){
         {(effMode==='hours'||effMode==='all') && canCreateSchedule(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenSchedule(true) }}><Plus size={17}/> New event</button>}
         {(effMode==='tasks'||effMode==='all') && canCreateTask(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenTask(true) }}><Plus size={17}/> New task</button>}
       </div></section>
-    <div className="panel calendar">
+    <div className="panel calendar" onTouchStart={onTS} onTouchEnd={onTE} onWheel={onWheelCal}>
       <div className="cal-toolbar"><button className="icon-btn" onClick={()=>shiftMonth(-1)}><ChevronLeft size={16}/></button><strong>{monthLabel}</strong><button className="icon-btn" onClick={()=>shiftMonth(1)}><ChevronRight size={16}/></button>
         <button className="text-btn" style={{marginLeft:'auto'}} onClick={()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonth(d) }}>Today</button></div>
       <div className="calendar-days">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><div key={d}>{d}</div>)}</div>
-      <div className="calendar-grid">{gridDays.map((d,i)=>{ const list=eventsOn(d); const inMonth=d.getMonth()===month.getMonth(); const isToday=sameDay(d,today)
+      <div className="calendar-grid" ref={gridRef}>{gridDays.map((d,i)=>{ const list=eventsOn(d); const inMonth=d.getMonth()===month.getMonth(); const isToday=sameDay(d,today)
         return <div key={i} className={`day ${list.length?'has-event':''} ${inMonth?'':'muted'} ${isToday?'today':''}`} onClick={()=>{ setEditMode(false); pickDay(d) }}>
           <b>{d.getDate()}</b>{list.slice(0,2).map(e=><span key={e.id}>{e.title}</span>)}{list.length>2 && <span className="more">+{list.length-2} more</span>}
         </div> })}</div>
@@ -1427,6 +1475,11 @@ function CalendarPage({profile}){
     </div>
     {selected && <Modal title={selected.date.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'})} onClose={()=>setSelected(null)}>
       {anyEditable && <Seg value={editMode?'e':'v'} onChange={v=>setEditMode(v==='e')} options={[['v',<><Eye size={13}/> View</>],['e',<><Pencil size={13}/> Edit</>]]}/>}
+
+      {(canAddEvent||canAddTask) && <div className="day-add top">
+        {canAddEvent && <button type="button" className="primary-btn" onClick={()=>startCreate('event')}><Plus size={16}/> New event on this day</button>}
+        {canAddTask && <button type="button" className={canAddEvent?'secondary-btn':'primary-btn'} onClick={()=>startCreate('task')}><Plus size={16}/> New task on this day</button>}
+      </div>}
       {selected.items.length===0 && <div className="empty" style={{padding:'18px 0 6px'}}>Nothing planned for this day yet.</div>}
       {selected.items.map(e=><div key={e.id} className="day-detail-row">
         <strong>{e.title}</strong>
@@ -1450,10 +1503,6 @@ function CalendarPage({profile}){
           {editMode && canEdit(e) && <button className="danger-btn" onClick={()=>deleteItem(e)}><Trash2 size={13}/> Delete</button>}
         </div>
       </div>)}
-      {(canAddEvent||canAddTask) && <div className="day-add">
-        {canAddEvent && <button type="button" className="primary-btn" onClick={()=>startCreate('event')}><Plus size={16}/> New event on this day</button>}
-        {canAddTask && <button type="button" className={canAddEvent?'secondary-btn':'primary-btn'} onClick={()=>startCreate('task')}><Plus size={16}/> New task on this day</button>}
-      </div>}
     </Modal>}
     {openSchedule && <ScheduleModal profile={profile} initialDate={createDate} onClose={()=>setOpenSchedule(false)} onSaved={load}/>}
     {openTask && <TaskModal profile={profile} initialDate={createDate} onClose={()=>setOpenTask(false)} onSaved={load}/>}
@@ -1492,13 +1541,14 @@ function useEventPeople(){
 }
 
 function ScheduleModal({profile,onClose,onSaved,initialDate}){
+  const sp=useContext(SettingsCtx).semPeriod
   const [form,setForm]=useState({title:'',description:'',location:'',date:initialDate||todayISO(),start:'',end:'',crew:{},slots:{}})
   const people=useEventPeople(); const [busy,setBusy]=useState(false)
   async function save(e){ e.preventDefault()
     if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
     setBusy(true)
     const start_at=new Date(`${form.date}T${form.start}`).toISOString(); const end_at=new Date(`${form.date}T${form.end}`).toISOString()
-    const {data:sched,error}=await supabase.from('schedules').insert({ title:form.title, description:form.description||null, location:form.location||null, department:'Media', start_at, end_at, created_by:profile.id, ...(Object.keys(cleanSlots(form.slots)).length?{slots:cleanSlots(form.slots)}:{}) }).select().single()
+    const {data:sched,error}=await supabase.from('schedules').insert({ title:form.title, description:form.description||null, location:form.location||null, department:'Media', start_at, end_at, created_by:profile.id, ...(semFor(form.date,sp)?{semester:semFor(form.date,sp)}:{}), ...(Object.keys(cleanSlots(form.slots)).length?{slots:cleanSlots(form.slots)}:{}) }).select().single()
     if(error){ notifyDialog(error.message); setBusy(false); return }
     const ids=Object.keys(form.crew)
     if(ids.length){ const {error:me}=await supabase.from('schedule_members').insert(ids.map(id=>({schedule_id:sched.id,member_id:id,duties:form.crew[id]}))); if(me) notifyDialog(me.message) }
@@ -1522,6 +1572,7 @@ function ScheduleModal({profile,onClose,onSaved,initialDate}){
 }
 
 function EditScheduleModal({schedule,onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
   const start=new Date(schedule.start_at); const end=new Date(schedule.end_at)
   const toTime=d=>d.toTimeString().slice(0,5)
   const [form,setForm]=useState({title:schedule.title,description:schedule.description||'',location:schedule.location||'',date:localISO(start),start:toTime(start),end:toTime(end),crew:{},slots:{...(schedule.slots||{})}})
@@ -1534,7 +1585,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
     if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
     setBusy(true)
     const start_at=new Date(`${form.date}T${form.start}`).toISOString(); const end_at=new Date(`${form.date}T${form.end}`).toISOString()
-    const {error}=await supabase.from('schedules').update({ title:form.title, description:form.description||null, location:form.location||null, start_at, end_at, ...((Object.keys(cleanSlots(form.slots)).length||hasSlots(schedule))?{slots:cleanSlots(form.slots)}:{}) }).eq('id',schedule.id)
+    const {error}=await supabase.from('schedules').update({ title:form.title, description:form.description||null, location:form.location||null, start_at, end_at, ...(semFor(form.date,sp)?{semester:semFor(form.date,sp)}:{}), ...((Object.keys(cleanSlots(form.slots)).length||hasSlots(schedule))?{slots:cleanSlots(form.slots)}:{}) }).eq('id',schedule.id)
     if(error){ notifyDialog(error.message); setBusy(false); return }
     const have=Object.keys(before), now=Object.keys(form.crew)
     const removed=have.filter(id=>!now.includes(id)); const added=now.filter(id=>!have.includes(id))
@@ -1625,7 +1676,6 @@ function AnnouncementModal({profile,onClose,onSaved}){
     else recipients=form.target
     const {error}=await supabase.from('announcements').insert({ sender_id:profile.id, title:form.title, body:form.body, audience:form.audience, target_user_ids:form.audience==='custom'?form.target:[] })
     if(error){ notifyDialog(error.message); setBusy(false); return }
-    if(recipients.length){ await supabase.from('notifications').insert(recipients.map(uid=>({ user_id:uid, title:form.title, body:form.body, kind:'announcement' }))) }
     setBusy(false); onClose(); onSaved()
   }
   return <Modal title="New announcement" onClose={onClose}><form onSubmit={save}>
