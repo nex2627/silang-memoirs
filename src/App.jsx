@@ -348,7 +348,7 @@ function Login({onLogin,theme,toggleTheme}){
       <form onSubmit={submit}>
         <label>ID number
           <div className="id-field">
-            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder="e.g. 2051076"/>
+            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email"/>
             {email.trim() && !email.includes('@') && <div className="id-overlay" aria-hidden="true"><span className="id-mirror">{email}</span><span className="id-suffix">@aup.edu.ph</span></div>}
           </div>
         </label>
@@ -1940,7 +1940,7 @@ function ResourceModal({profile,onClose,onSaved}){
     setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
   }
   return <Modal title="Add resource" onClose={onClose}><form onSubmit={save}>
-    <label>Name<input required placeholder="e.g. AUP Calendar" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
+    <label>Name<input required placeholder="" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
     <label>Photo (optional)<input type="file" accept="image/*" onChange={e=>pick(e.target.files?.[0])}/></label>
     {preview && <img className="resource-preview" src={preview} alt="Preview"/>}
     <label>Link (optional)<input type="url" placeholder="https://… Canva, Drive…" value={form.url} onChange={e=>setForm({...form,url:e.target.value})}/></label>
