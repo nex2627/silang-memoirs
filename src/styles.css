@@ -949,3 +949,13 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .sp-pick{display:flex;gap:8px;align-items:center}.sp-pick .select{min-width:0}
 .sp-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
 @media(max-width:760px){.sp-row{flex-wrap:wrap}.sp-pick{width:100%}.sp-pick>*:first-child{flex:1}}
+
+/* Round 26: notification banner + dropdown scroll */
+.ticker.noti{background:linear-gradient(90deg,rgba(120,150,190,.26),rgba(120,150,190,.1))}
+.ticker.noti .ticker-tag{background:#8fa9cc}
+.ticker.noti .ticker-dot{background:#8fa9cc}
+.sel-list{overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
+
+/* Round 27: tracker head actions */
+.head-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+@media(max-width:760px){.head-actions{width:100%}.head-actions .primary-btn{flex:1;justify-content:center}}
