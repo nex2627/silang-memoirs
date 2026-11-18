@@ -1,31 +1,2129 @@
+import { Children, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { supabase, applyLoginMode } from './lib/supabase'
+import {
+  LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
+  Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
+  ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
+  Download, Copy, SlidersHorizontal, Activity as ActivityIcon, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
 
-const IMG='silang-images-v1'
-self.addEventListener('install',()=>self.skipWaiting())
-self.addEventListener('activate',e=>e.waitUntil((async()=>{ for(const k of await caches.keys()) if(k!==CACHE&&k!==IMG) await caches.delete(k); await self.clients.claim() })()))
-self.addEventListener('fetch',e=>{
-  const req=e.request
-  if(req.method!=='GET') return
-  
-  if(req.destination==='image' && new URL(req.url).origin!==self.location.origin){
-    e.respondWith((async()=>{ const c=await caches.open(IMG); const hit=await c.match(req); const net=fetch(req).then(r=>{ if(r&&(r.ok||r.type==='opaque')) c.put(req,r.clone()); return r }).catch(()=>hit); return hit||net })())
-    return
+} from 'lucide-react'
+
+/* ---------------- Config ---------------- */
+const ROLE_META = {
+  admin:          { label:'Admin',        dept:null,           mode:'admin', head:false },
+  eic:            { label:'EIC',          dept:'EDBO',         mode:'admin', head:false },
+  aeic:           { label:'AEIC',         dept:'EDBO',         mode:'admin', head:false },
+  edbo:           { label:'EDBO',         dept:'EDBO',         mode:'view',  head:false },
+  art_director:   { label:'Art Director', dept:'Art Director', mode:'tasks', head:false },
+  head_media:     { label:'Head Media',   dept:'Media',        mode:'hours', head:true  },
+  staff_media:    { label:'Media',        dept:'Media',        mode:'hours', head:false },
+  head_colorist:  { label:'TD',           dept:'Colorist',     mode:'tasks', head:true  },
+  staff_colorist: { label:'Colorist',     dept:'Colorist',     mode:'tasks', head:false },
+}
+const DEPARTMENTS = ['Media','Colorist','Art Director']
+const DEPT_ICON = { Media:Camera, Colorist:Wand2, 'Art Director':LayoutDashboard }
+// EDBO positions you can pick when creating / editing an account -> the database role behind them.
+const EDBO_POSITIONS = [['EIC','eic'],['AEIC','aeic'],['TD','head_colorist'],['Finance','edbo'],['Art Director','art_director'],['Head Media','head_media'],['Head Layout','edbo'],['Head Researcher','edbo'],['Head Writer','edbo']]
+const ACCOUNT_GROUPS = ['Admin','EDBO','Media','Colorist']
+// What is stored in the database: only 4 roles. EDBO members are told apart by their Position.
+const DB_ROLE = { Admin:'admin', EDBO:'edbo', Media:'media', Colorist:'colorist' }
+const POS_ROLE = { 'eic':'eic', 'aeic':'aeic', 'td':'head_colorist', 'art director':'art_director', 'head media':'head_media' }
+const EDBO_ORDER = ['EIC','AEIC','TD','Finance','Art Director','Head Media','Head Layout','Head Researcher','Head Writer']
+const SECTION_ORDER = ['Admin','EDBO','Media','Colorist']
+const DUTIES = [['PM','Photo Main'],['PC','Photo Creative'],['VM','Video Main'],['VC','Video Creative']]
+// Open duty slots: the head says how many PM / PC / VM / VC spots an event has, members grab them (or the head assigns people).
+const slotsOf=s=>(s&&s.slots)||{}
+const dutyTaken=(s,d)=>(s.schedule_members||[]).filter(m=>(m.duties||[]).includes(d)).length
+const dutyLeft=(s,d)=>Math.max(0,(slotsOf(s)[d]||0)-dutyTaken(s,d))
+const hasSlots=s=>DUTIES.some(([d])=>(slotsOf(s)[d]||0)>0)
+const hasOpenDuty=s=>DUTIES.some(([d])=>dutyLeft(s,d)>0)
+const canGrab=role=>role==='staff_media'||role==='staff_colorist'
+const cleanSlots=o=>Object.fromEntries(DUTIES.map(([d])=>[d,Math.max(0,Math.min(20,Number(o?.[d])||0))]).filter(([,n])=>n>0))
+const LOGO = `${import.meta.env.BASE_URL}logo.png`
+const EDITION = 'Nexemeral 27'
+const WELCOME_LINE = 'Keep every story, page, photograph and fact moving toward the finished yearbook.'
+const IDLE_LIMIT_MS = 3*60*1000
+// Pipeline: Media event sorted -> TD assigns colorgrading (self / Colorist / EDBO) -> all colorgraded -> Art Director makes the Facebook cover -> posted.
+const TD_STAGE = { dept:'Colorist', verb:'colorgrading', titlePrefix:'Colorgrading' }
+
+/* ---------------- Helpers ---------------- */
+// Database (role + position) -> the working role the screens use.
+function effRole(role,position){ if(role==='edbo') return POS_ROLE[String(position||'').trim().toLowerCase()]||'edbo'; if(role==='media') return 'staff_media'; if(role==='colorist') return 'staff_colorist'; return role }
+function normP(p){ if(!p) return p; const role=effRole(p.role,p.position); return {...p, dbRole:p.role, role, department:ROLE_META[role]?.dept||p.department} }
+async function fetchProfiles(){ const {data,error}=await supabase.from('profiles').select('*').order('full_name'); if(error) console.error(error); return (data||[]).map(normP) }
+async function fetchActive(){ return (await fetchProfiles()).filter(p=>p.active!==false) }
+// Directory order: Admin, then EDBO (EIC, AEIC, TD, Finance, Art Director, Head Media, Head Layout, Head Researcher, Head Writer), then Media, then Colorist.
+function edboRank(p){ const i=EDBO_ORDER.findIndex(x=>x.toLowerCase()===String(p.position||'').trim().toLowerCase()); if(i>=0) return i; const f={eic:0,aeic:1,head_colorist:2,art_director:4,head_media:5}[p.role]; return f??50 }
+function dirSort(a,b){ return SECTION_ORDER.indexOf(groupOf(a.role))-SECTION_ORDER.indexOf(groupOf(b.role)) || edboRank(a)-edboRank(b) || (a.full_name||'').localeCompare(b.full_name||'') }
+// Semester filter: 2nd semester is what everyone sees by default; 1st semester is the imported archive, kept for checking.
+const SEM_OPTIONS=[['2','2nd semester'],['1','1st semester']]
+// 1st-semester period (admin setting): month/day range that repeats every year. Returns 1 or 2, or undefined when no period is set.
+function semFor(iso,p){ if(!p||!p.from||!p.to||!iso) return undefined; const md=String(iso).slice(5,10); const inside=p.from<=p.to?(md>=p.from&&md<=p.to):(md>=p.from||md<=p.to); return inside?1:2 }
+const inSem=(x,sem)=>sem==='all'||(x.semester??2)===Number(sem)
+const evHours=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
+// Switch for the top right of a page: 1st sem / 2nd sem / Both.
+function SemSwitch({value,onChange}){
+  const opts=[['1','1st sem'],['2','2nd sem'],['all','Both']]; const i=Math.max(0,opts.findIndex(o=>o[0]===value))
+  return <div className="sem-switch" role="tablist"><span className="sem-slider" style={{transform:`translateX(${i*100}%)`}}/>{opts.map(([v,l])=><button type="button" role="tab" aria-selected={value===v} key={v} className={value===v?'on':''} onClick={()=>onChange(v)}>{l}</button>)}</div>
+}
+// One box that always shows both semesters: total, 1st, 2nd and the split bar.
+function SemSummary({h1,h2,unit='hrs',label='Total hours'}){
+  const t=h1+h2; const p1=t?h1/t*100:0; const f=n=>unit==='hrs'?n.toFixed(1):String(n)
+  const [go,setGo]=useState(false); useEffect(()=>{ const id=setTimeout(()=>setGo(true),80); return ()=>clearTimeout(id) },[])
+  return <div className="panel sem-box">
+    <div className="sem-main"><small>{label}</small><div className="sem-big"><CountUp value={f(t)}/><span>{unit}</span></div></div>
+    <div className="sem-divider"/>
+    <div className="sem-part"><small>1st sem</small><div><CountUp value={f(h1)}/></div></div>
+    <div className="sem-part"><small>2nd sem</small><div><CountUp value={f(h2)}/></div></div>
+    <div className="sem-split"><div className="sem-legend"><span className="l1">1st sem</span><span className="l2">2nd sem</span></div>
+      <div className="sem-bar"><i style={{width:`${go?p1:0}%`,background:'#b2b6ae'}}/><i style={{width:`${go?100-p1:0}%`,background:'var(--sand)'}}/></div></div>
+  </div>
+}
+// Everyone who covered an event: linked crew first, then names carried over from the old sheet.
+function mediaNames(e){ return [...(e.schedule_members||[]).map(m=>crewText(m)).filter(Boolean),...(e.legacy_media?[e.legacy_media]:[])].join(', ') }
+function colorNames(e,tasks){ return [...(tasks||[]).filter(t=>t.schedule_id===e.id&&t.department==='Colorist').map(t=>t.profiles?.full_name).filter(Boolean),...(e.legacy_colorist?[e.legacy_colorist]:[])].join(', ') }
+// Video-only crew (VM / VC) do not have to sort photos.
+function needsSort(m){ const d=m.duties||[]; return !(d.length && d.every(x=>x==='VM'||x==='VC')) }
+function isHead(role){ return !!ROLE_META[role]?.head }
+function isStaff(role){ return !!role && role.startsWith('staff_') }
+function isAdminLike(role){ return ['admin','eic','aeic'].includes(role) }   // can add / edit everything
+function isViewer(role){ return role==='edbo' }                                  // board members who can only look
+function seesAll(role){ return isAdminLike(role) || isViewer(role) }
+function isWorker(role){ return isStaff(role) || role==='art_director' }       // sees only their own assigned work
+function isTD(role){ return role==='head_colorist' }
+const BOARD_ASSIGNABLE=['eic','aeic','art_director','head_colorist']             // EDBO who can be given colorgrading
+const EVENT_BOARD=[...BOARD_ASSIGNABLE,'head_media']                              // EDBO who can be put on events
+function roleDept(role){ return ROLE_META[role]?.dept || null }
+function roleMode(role){ return ROLE_META[role]?.mode || 'admin' }
+function groupOf(role){ return role==='admin'?'Admin':role==='staff_media'?'Media':role==='staff_colorist'?'Colorist':'EDBO' }
+function roleLabel(p){ if(!p) return ''; if(p.role==='edbo') return p.position||'EDBO'; return ROLE_META[p.role]?.label || p.role }
+function canCreateTask(role){ return isAdminLike(role) || isTD(role) }
+function canCreateSchedule(role){ return isAdminLike(role) || role==='head_media' }
+function canManageAccounts(role){ return role==='admin' }
+function managedTaskDepts(role){ if(seesAll(role)) return ['Colorist','Art Director']; if(isTD(role)) return ['Colorist']; return [] }
+function hasPostingTracker(role){ return isAdminLike(role) || isTD(role) || role==='art_director' || role==='head_media' }
+function crewText(m){ return `${m.profiles?.full_name||''}${(m.duties||[]).length?` · ${m.duties.join('/')}`:''}` }
+function initials(name=''){ return name.split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase() }
+// One avatar everywhere: the uploaded photo when there is one, initials otherwise.
+function Avatar({url,name,cls='avatar'}){
+  const [bad,setBad]=useState(false)
+  return <span className={cls}>{url&&!bad?<img src={url} alt="" loading="lazy" onError={()=>setBad(true)} style={{width:'100%',height:'100%',borderRadius:'50%',objectFit:'cover',display:'block'}}/>:initials(name)}</span>
+}
+// Segmented switch with a pill that glides to the selected option (also works when the buttons wrap).
+function Seg({value,options,onChange,className='seg-switch'}){
+  const box=useRef(null); const [pill,setPill]=useState(null)
+  const place=()=>{ const b=box.current?.querySelector('button.on'); if(b) setPill({x:b.offsetLeft,y:b.offsetTop,w:b.offsetWidth,h:b.offsetHeight}) }
+  useLayoutEffect(()=>{ place() },[value,options.length])  // eslint-disable-line
+  useEffect(()=>{ const f=()=>place(); window.addEventListener('resize',f); const t=setTimeout(place,350); return ()=>{ window.removeEventListener('resize',f); clearTimeout(t) } },[])  // eslint-disable-line
+  return <div ref={box} className={`${className} seg-fx`} role="tablist">
+    {pill && <span className="seg-pill" style={{width:pill.w,height:pill.h,transform:`translate(${pill.x}px,${pill.y}px)`}}/>}
+    {options.map(([k,label,count])=><button type="button" key={k} className={value===k?'on':''} onClick={()=>onChange(k)}>{label}{count!==undefined&&<em>{count}</em>}</button>)}
+  </div>
+}
+function greet(){ const h=new Date().getHours(); return h<12?'Good morning':h<18?'Good afternoon':'Good evening' }
+function sameDay(a,b){ return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate() }
+function fmtTime(iso){ return new Date(iso).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) }
+function fmtDay(d,withYear=true){ if(!d) return '—'; const x=d instanceof Date?d:new Date(d.length===10?d+'T00:00:00':d); if(isNaN(x)) return '—'; return x.toLocaleDateString([], withYear?{weekday:'short',month:'short',day:'numeric',year:'numeric'}:{weekday:'short',month:'short',day:'numeric'}) }
+function todayISO(){ const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+// Button that stays neutral, lights up on hover, and turns green with a check once it has been pressed.
+function ActionButton({label,doneLabel,run,after,className=''}){
+  const [st,setSt]=useState('idle')
+  async function go(){ if(st!=='idle') return; setSt('busy'); let r; try{ r=await run() }catch(e){ r={error:e} } if(r&&r.error){ notifyDialog(r.error.message||'Something went wrong.'); setSt('idle'); return } setSt('done'); setTimeout(()=>{ after&&after() },750) }
+  return <button type="button" className={`act-btn ${st} ${className}`} onClick={e=>{ e.stopPropagation(); go() }} disabled={st!=='idle'}>
+    {st==='busy'?<span className="loader-ring" style={{width:12,height:12,borderWidth:2}}/>:st==='done'?<><Check size={14}/> {doneLabel||label}</>:label}
+  </button>
+}
+function usePoll(fn,ms=30000){ const ref=useRef(fn); ref.current=fn; useEffect(()=>{ const t=setInterval(()=>ref.current(),ms); const vis=()=>{ if(document.visibilityState==='visible') ref.current() }; document.addEventListener('visibilitychange',vis); return ()=>{ clearInterval(t); document.removeEventListener('visibilitychange',vis) } },[]) }
+// ---- Date field: type the numbers (10/25/2026, 2026-10-25, 102526 …) or tap the calendar icon.
+function parseDateText(txt){
+  const t=(txt||'').trim(); if(!t) return ''
+  let y,m,d,mt
+  if((mt=t.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/))){ y=+mt[1]; m=+mt[2]; d=+mt[3] }
+  else if((mt=t.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2}|\d{4})$/))){ m=+mt[1]; d=+mt[2]; y=+mt[3]; if(y<100) y+=2000 }
+  else if((mt=t.match(/^(\d{2})(\d{2})(\d{4})$/))){ m=+mt[1]; d=+mt[2]; y=+mt[3] }
+  else if((mt=t.match(/^(\d{4})(\d{2})(\d{2})$/))){ y=+mt[1]; m=+mt[2]; d=+mt[3] }
+  else return null
+  const dt=new Date(y,m-1,d); if(dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==d) return null
+  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+}
+function isoToText(iso){ if(!iso) return ''; const [y,m,d]=iso.split('-'); return `${m}/${d}/${y}` }
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December']
+const isoOf=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+function CalendarPop({anchor,value,onPick,onClose,allowClear}){
+  const init=value?new Date(value+'T00:00:00'):new Date()
+  const [v,setV]=useState({y:init.getFullYear(),m:init.getMonth()}); const [mode,setMode]=useState('days'); const [pos,setPos]=useState(null); const ref=useRef(null)
+  const phone=window.innerWidth<=760
+  useEffect(()=>{
+    if(!phone&&anchor){ const r=anchor.getBoundingClientRect(); const w=320,h=392; const left=Math.min(Math.max(12,r.left),window.innerWidth-w-12); let top=r.bottom+8; if(top+h>window.innerHeight-12) top=Math.max(12,r.top-h-8); setPos({left,top}) }
+    const down=e=>{ if(ref.current&&!ref.current.contains(e.target)&&!(anchor&&anchor.contains(e.target))) onClose() }
+    const key=e=>{ if(e.key==='Escape') onClose() }
+    document.addEventListener('mousedown',down); document.addEventListener('keydown',key)
+    return ()=>{ document.removeEventListener('mousedown',down); document.removeEventListener('keydown',key) }
+  },[])  // eslint-disable-line
+  const first=new Date(v.y,v.m,1).getDay(); const cells=Array.from({length:42},(_,i)=>new Date(v.y,v.m,1-first+i)); const today=isoOf(new Date())
+  const step=n=>setV(x=>{ const d=new Date(x.y,x.m+n,1); return {y:d.getFullYear(),m:d.getMonth()} })
+  return createPortal(<div className={`cal-layer ${phone?'phone':''}`} onMouseDown={e=>{ if(phone&&e.target===e.currentTarget) onClose() }}>
+    <div className="cal-pop" ref={ref} style={phone?undefined:(pos||{opacity:0})}>
+      <div className="cal-head">
+        <button type="button" className="cal-nav" onClick={()=>mode==='days'?step(-1):setV(x=>({...x,y:x.y-1}))}><ChevronLeft size={16}/></button>
+        <button type="button" className="cal-title" onClick={()=>setMode(m=>m==='days'?'months':'days')}>{mode==='days'?`${MONTHS[v.m]} ${v.y}`:v.y}<ChevronDown size={14} className={mode==='months'?'flip':''}/></button>
+        <button type="button" className="cal-nav" onClick={()=>mode==='days'?step(1):setV(x=>({...x,y:x.y+1}))}><ChevronRight size={16}/></button>
+      </div>
+      {mode==='days' ? <>
+        <div className="cal-week">{['S','M','T','W','T','F','S'].map((d,i)=><span key={i}>{d}</span>)}</div>
+        <div className="cal-grid" key={`${v.y}-${v.m}`}>{cells.map(d=>{ const iso=isoOf(d); const out=d.getMonth()!==v.m; return <button type="button" key={iso} className={`cal-day ${out?'out':''} ${iso===today?'today':''} ${iso===value?'sel':''}`} onClick={()=>{ onPick(iso); onClose() }}>{d.getDate()}</button> })}</div>
+      </> : <div className="cal-months">{MONTHS.map((n,i)=><button type="button" key={n} className={i===v.m?'sel':''} onClick={()=>{ setV(x=>({...x,m:i})); setMode('days') }}>{n.slice(0,3)}</button>)}</div>}
+      <div className="cal-foot">
+        {allowClear?<button type="button" onClick={()=>{ onPick(''); onClose() }}>Clear</button>:<span/>}
+        <button type="button" className="gold" onClick={()=>{ onPick(today); onClose() }}>Today</button>
+      </div>
+    </div>
+  </div>,document.body)
+}
+function DateField({value,onChange,required,placeholder='MM/DD/YYYY',className}){
+  const [txt,setTxt]=useState(isoToText(value)); const [bad,setBad]=useState(false)
+  const [calOpen,setCalOpen]=useState(false); const wrap=useRef(null); const box=useRef(null)
+  useEffect(()=>{ setTxt(isoToText(value)); setBad(false) },[value])
+  useEffect(()=>{ box.current?.setCustomValidity(required&&!value?'Enter a valid date (e.g. 10/25/2026).':'') },[value,required])
+  function commit(){ const iso=parseDateText(txt); if(iso===null){ setBad(true); onChange(''); return } setBad(false); onChange(iso); setTxt(isoToText(iso)) }
+  return <div className={`date-field ${bad?'bad':''} ${className||''}`}>
+    <div className="date-field-box" ref={wrap}>
+      <input ref={box} inputMode="numeric" placeholder={placeholder} value={txt} onChange={e=>{ setTxt(e.target.value); const iso=parseDateText(e.target.value); if(iso) { setBad(false); onChange(iso) } else if(!e.target.value) onChange('') }} onBlur={commit} onKeyDown={e=>{ if(e.key==='Enter'){ commit() } }}/>
+      <button type="button" className="date-pick-btn" onClick={()=>setCalOpen(o=>!o)} tabIndex={-1} title="Pick from calendar"><CalendarDays size={15}/></button>
+      {calOpen && <CalendarPop anchor={wrap.current} value={value} allowClear={!required} onPick={v=>{ setBad(false); onChange(v) }} onClose={()=>setCalOpen(false)}/>}
+    </div>
+    {value && !bad && <small className="date-hint">{fmtDay(value)}</small>}
+    {bad && <small className="date-hint err">Use MM/DD/YYYY</small>}
+  </div>
+}
+
+// ---- Time field: pick from the list (6:00 AM, 15-min steps) or type numbers like 930, 9:30pm, 14:30.
+const TIME_OPTIONS=(()=>{ const out=[]; for(let i=0;i<96;i++){ const mins=(6*60+i*15)%1440; const h=Math.floor(mins/60); const m=mins%60; out.push([`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`,fmtHM(h,m)]) } return out })()
+function fmtHM(h,m){ const ap=h>=12?'PM':'AM'; const hh=h%12===0?12:h%12; return `${hh}:${String(m).padStart(2,'0')} ${ap}` }
+function parseTimeText(txt){
+  const t=(txt||'').trim().toLowerCase().replace(/\./g,''); if(!t) return ''
+  const mt=t.match(/^(\d{1,2})(?::?(\d{2}))?\s*(am|pm|a|p)?$/); if(!mt) return null
+  let h=+mt[1]; const m=mt[2]?+mt[2]:0; const ap=mt[3]
+  if(m>59) return null
+  if(ap){ if(h<1||h>12) return null; if(ap[0]==='p'&&h<12) h+=12; if(ap[0]==='a'&&h===12) h=0 }
+  else if(h>23) return null
+  else if(!mt[2] && h>=1 && h<=5) h+=12 // bare "3" while typing hours usually means afternoon in an event schedule
+  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`
+}
+function timeLabel(v){ if(!v) return ''; const [h,m]=v.split(':').map(Number); return fmtHM(h,m) }
+function TimeField({value,onChange,required}){
+  const [txt,setTxt]=useState(timeLabel(value)); const [open,setOpen]=useState(false); const [bad,setBad]=useState(false)
+  const box=useRef(null); const list=useRef(null)
+  useEffect(()=>{ setTxt(timeLabel(value)); setBad(false) },[value])
+  useEffect(()=>{ box.current?.setCustomValidity(required&&!value?'Choose or type a time.':'') },[value,required])
+  useEffect(()=>{ if(open && list.current){ const el=list.current.querySelector('.active')||list.current.firstChild; if(el) list.current.scrollTop=Math.max(0,el.offsetTop-70) } },[open])
+  function commit(){ const v=parseTimeText(txt); if(v===null){ setBad(true); onChange(''); return } setBad(false); onChange(v); setTxt(timeLabel(v)) }
+  function choose(v){ onChange(v); setTxt(timeLabel(v)); setBad(false); setOpen(false) }
+  const q=txt.trim().toLowerCase(); const shown=(open&&q&&timeLabel(value)!==txt)?TIME_OPTIONS.filter(([v,l])=>l.toLowerCase().replace(/[: ]/g,'').startsWith(q.replace(/[: ]/g,''))||l.toLowerCase().includes(q)):TIME_OPTIONS
+  return <div className={`time-field ${bad?'bad':''}`}>
+    <input ref={box} inputMode="numeric" placeholder="Select or type time" value={txt} autoComplete="off"
+      onFocus={e=>{ setOpen(true); e.target.select() }} onChange={e=>{ setTxt(e.target.value); setOpen(true) }}
+      onBlur={()=>{ setTimeout(()=>setOpen(false),120); commit() }}
+      onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); setOpen(false) } if(e.key==='Escape') setOpen(false) }}/>
+    <Clock3 size={15} className="time-ic"/>
+    {open && <div className="time-list" ref={list}>{shown.length?shown.map(([v,l])=><button type="button" key={v} className={v===value?'active':''} onMouseDown={e=>{ e.preventDefault(); choose(v) }}>{l}</button>):<div className="time-none">Press Enter to use “{txt}”</div>}</div>}
+  </div>
+}
+function toCSV(rows){ if(!rows.length) return ''; const cols=Object.keys(rows[0]); const esc=v=>{ if(v==null) return ''; const s=String(v).replace(/"/g,'""'); return /[",\n]/.test(s)?`"${s}"`:s }; return [cols.join(','),...rows.map(r=>cols.map(c=>esc(r[c])).join(','))].join('\n') }
+function downloadCSV(filename,rows){ if(!rows.length){ notifyDialog('Nothing to export yet.'); return } const blob=new Blob([toCSV(rows)],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; a.click(); URL.revokeObjectURL(a.href) }
+
+function useTheme(){
+  const [theme,setTheme]=useState(()=>{ try{return localStorage.getItem('sm-theme')||'light'}catch{return 'light'} })
+  useEffect(()=>{ document.documentElement.setAttribute('data-theme',theme); try{localStorage.setItem('sm-theme',theme)}catch{} },[theme])
+  return [theme, ()=>{ const r=document.documentElement; r.classList.add('theme-switching'); clearTimeout(window.__themeT); window.__themeT=setTimeout(()=>r.classList.remove('theme-switching'),900); setTheme(t=>t==='light'?'dark':'light') }]
+}
+function ThemeToggle({theme,onToggle,floating}){
+  return <button className={floating?'theme-toggle-floating':'theme-toggle'} onClick={onToggle} title="Toggle theme">
+    <span key={theme} className="theme-ico">{theme==='light'?<Moon size={floating?18:15}/>:<Sun size={floating?18:15}/>}</span>
+  </button>
+}
+
+/* ---------------- Install as an app ---------------- */
+function useInstall(){
+  const [,tick]=useState(0)
+  useEffect(()=>{ const f=()=>tick(n=>n+1); window.addEventListener('sm-install-ready',f); return ()=>window.removeEventListener('sm-install-ready',f) },[])
+  const installed=typeof window!=='undefined' && (window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone===true)
+  async function prompt(){ const e=window.__installEvt; if(!e) return false; e.prompt(); try{ await e.userChoice }catch{} window.__installEvt=null; tick(n=>n+1); return true }
+  return {installed, prompt}
+}
+function InstallModal({onClose}){
+  const ua=navigator.userAgent; const ios=/iphone|ipad|ipod/i.test(ua); const android=/android/i.test(ua)
+  return <Modal title="Install Silang Memoirs" onClose={onClose}>
+    <p style={{color:'var(--text-dim)',fontSize:13,marginTop:-6}}>Add the app to your {ios||android?'home screen':'computer'} so it opens like a normal app, with its own icon and no browser bar.</p>
+    {ios ? <ol className="install-steps"><li>Open this page in <b>Safari</b>.</li><li>Tap the <b>Share</b> button (square with an arrow).</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol>
+    : android ? <ol className="install-steps"><li>Open this page in <b>Chrome</b>.</li><li>Tap the <b>⋮</b> menu at the top right.</li><li>Choose <b>Install app</b> (or <b>Add to Home screen</b>).</li></ol>
+    : navigator.brave ? <ol className="install-steps"><li>Brave doesn't let websites open the install popup, so it has to be done from its own menu.</li><li>Click the <b>☰ menu</b> (top right) → <b>Save and share</b> → <b>Install Silang Memoirs</b>.</li></ol>
+    : /safari/i.test(ua)&&!/chrome|crios|edg/i.test(ua) ? <ol className="install-steps"><li>In the menu bar click <b>File → Add to Dock</b>.</li></ol>
+    : <ol className="install-steps"><li>Click the <b>install icon</b> at the right end of the address bar, or open the ⋮ menu → <b>Install Silang Memoirs</b>.</li></ol>}
+    <div className="modal-actions"><button className="primary-btn" onClick={onClose}>Got it</button></div>
+  </Modal>
+}
+
+/* ---------------- Root ---------------- */
+export default function App(){
+  const [session,setSession]=useState(undefined)
+  const [profile,setProfile]=useState(null)
+  const [theme,toggleTheme]=useTheme()
+
+  useEffect(()=>{
+    if(!supabase){ setSession(null); return }
+    let mounted=true
+    ;(async()=>{
+      const {data}=await supabase.auth.getSession()
+      let s=data.session
+      if(s){
+        const last=Number(localStorage.getItem('sm-last-active')||0)
+        if(last && Date.now()-last>IDLE_LIMIT_MS){ await supabase.auth.signOut(); s=null }
+      }
+      if(!mounted) return
+      if(s) await loadProfile(s.user.id); else setProfile(null)
+      setSession(s)
+    })()
+    const {data:sub}=supabase.auth.onAuthStateChange(async(_e,s)=>{ if(s) await loadProfile(s.user.id); else setProfile(null); setSession(s) })
+    return ()=>{ mounted=false; sub.subscription.unsubscribe() }
+  },[])
+
+  // Stamp "last active" while a session is open, so a 3+ minute absence forces a fresh login on return.
+  useEffect(()=>{
+    if(!session) return
+    function ping(){ try{ localStorage.setItem('sm-last-active',String(Date.now())) }catch{} }
+    ping()
+    const t=setInterval(ping,15000)
+    window.addEventListener('visibilitychange',ping)
+    window.addEventListener('beforeunload',ping)
+    return ()=>{ clearInterval(t); window.removeEventListener('visibilitychange',ping); window.removeEventListener('beforeunload',ping) }
+  },[session])
+
+  async function loadProfile(id){ const {data,error}=await supabase.from('profiles').select('*').eq('id',id).single(); if(error) console.error(error); setProfile(normP(data)||null) }
+
+  if(!supabase) return <SetupScreen theme={theme} toggleTheme={toggleTheme}/>
+  if(session===undefined) return <LoadingScreen/>
+  if(!session) return <Login theme={theme} toggleTheme={toggleTheme} onLogin={async()=>{ const {data}=await supabase.auth.getSession(); if(data.session) await loadProfile(data.session.user.id); setSession(data.session) }}/>
+  if(!profile) return <LoadingScreen/>
+  if(!ROLE_META[profile.role] || profile.active===false) return <RetiredScreen profile={profile} theme={theme} toggleTheme={toggleTheme}/>
+  return <Workspace profile={profile} onProfileRefresh={()=>loadProfile(profile.id)} theme={theme} toggleTheme={toggleTheme}/>
+}
+
+function RetiredScreen({profile,theme,toggleTheme}){
+  return <div className="center-screen login-bg"><ThemeToggle theme={theme} onToggle={toggleTheme} floating/>
+    <div className="login-card"><img className="brand-mark big" src={LOGO} alt=""/><h1>Account not active</h1>
+    <p>{profile.active===false?'This account has been deactivated.':'This account’s position is no longer used in the system.'} Please ask the Admin to update it.</p>
+    <button className="primary-btn wide" style={{marginTop:22}} onClick={()=>supabase.auth.signOut()}>Log out</button></div></div>
+}
+
+function LoadingScreen(){
+  return <div className="center-screen loader-screen">
+    <div className="loader-wrap">
+      <div className="loader-orbit"><img className="loader-logo" src={LOGO} alt=""/><span className="loader-dot"/></div>
+      <div className="loader-text">SILANG MEMOIRS</div>
+      <div className="loader-bar"><span/></div>
+    </div>
+  </div>
+}
+
+function SetupScreen({theme,toggleTheme}){
+  return <div className="center-screen login-bg"><ThemeToggle theme={theme} onToggle={toggleTheme} floating/>
+    <div className="login-card"><img className="brand-mark big" src={LOGO} alt=""/><h1>Silang Memoirs</h1><p>Your Supabase environment variables are not configured yet.</p>
+    <ol><li>Copy <b>.env.example</b> to <b>.env</b>.</li><li>Put your Supabase project URL in <b>VITE_SUPABASE_URL</b>.</li><li>Put your publishable key in <b>VITE_SUPABASE_PUBLISHABLE_KEY</b>.</li><li>Restart <b>npm run dev</b>.</li></ol></div></div>
+}
+
+/* ---------------- Login ---------------- */
+function Login({onLogin,theme,toggleTheme}){
+  const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [show,setShow]=useState(false)
+  const [busy,setBusy]=useState(false); const [error,setError]=useState('')
+  const fullEmail=()=>{ const v=email.trim(); return v.includes('@')?v:`${v}@aup.edu.ph` }
+  async function submit(e){ e.preventDefault(); setBusy(true); setError(''); const {error}=await supabase.auth.signInWithPassword({email:fullEmail(),password}); if(error) setError(error.message); else { try{ localStorage.removeItem('sm-page'); window.history.replaceState(null,'',window.location.pathname+window.location.search) }catch{} await onLogin() } setBusy(false) }
+  return <div className="center-screen login-bg">
+    <ThemeToggle theme={theme} onToggle={toggleTheme} floating/>
+    <div className="login-card">
+      <img className="brand-mark big" src={LOGO} alt="Silang Memoirs"/>
+      <div className="login-tagline">SILANG MEMOIRS • {EDITION.toUpperCase()}</div>
+      <h1>Hello, welcome…</h1>
+      <form onSubmit={submit}>
+        <label>ID number
+          <div className="id-field">
+            <input type="text" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="email" placeholder="e.g. 2051076"/>
+            {email.trim() && !email.includes('@') && <div className="id-overlay" aria-hidden="true"><span className="id-mirror">{email}</span><span className="id-suffix">@aup.edu.ph</span></div>}
+          </div>
+        </label>
+        <label>Password
+          <div className="field-icon-wrap">
+            <input type={show?'text':'password'} value={password} onChange={e=>setPassword(e.target.value)} required autoComplete="current-password"/>
+            <button type="button" className="icon-toggle" onClick={()=>setShow(s=>!s)} tabIndex={-1}>{show?<EyeOff size={15}/>:<Eye size={15}/>}</button>
+          </div>
+        </label>
+        {error && <div className="error">{error}</div>}
+        <button className="primary-btn wide" disabled={busy}>{busy?<><span className="loader-ring" style={{width:16,height:16,borderWidth:2}}/> Logging in…</>:'Log in'}</button>
+      </form>
+    </div>
+  </div>
+}
+
+/* ---------------- Workspace shell ---------------- */
+// Mobile pull-down-to-refresh: the SM logo spins while the page reloads (it comes back on the same section).
+// Past the top / bottom of a page: one quick bounce + soft glow, played instantly (no tracking, so nothing can lag).
+function EdgeBounce(){
+  const glow=useRef(null)
+  useEffect(()=>{
+    let cool=0, acc=0, accT=null
+    const edge=()=>{ const y=window.scrollY||document.documentElement.scrollTop; return {top:y<=0,bot:y+window.innerHeight>=document.documentElement.scrollHeight-1} }
+    const blocked=t=>document.querySelector('.modal-backdrop')||(t&&t.closest&&t.closest('textarea,.select-list,.cal-pop,.table-scroll'))
+    function play(dir){   // dir: 'top' or 'bot'
+      if(Date.now()<cool) return; cool=Date.now()+950
+      const n=document.querySelector('.main > .content'); const g=glow.current
+      if(n&&n.animate){ const d=dir==='top'?1:-1; n.animate([{transform:'translate3d(0,0,0)',easing:'cubic-bezier(.2,.7,.3,1)'},{transform:`translate3d(0,${40*d}px,0)`,offset:.38,easing:'cubic-bezier(.45,0,.25,1)'},{transform:`translate3d(0,${-7*d}px,0)`,offset:.72,easing:'cubic-bezier(.4,0,.3,1)'},{transform:'translate3d(0,0,0)'}],{duration:900}) }
+      if(g){ g.className='edge-glow '+dir; void g.offsetWidth; g.classList.add('go'); setTimeout(()=>g.classList.remove('go'),900) }
+    }
+    const onWheel=e=>{
+      if(blocked(e.target)) return
+      const {top,bot}=edge(); const dy=e.deltaY
+      if(Math.abs(dy)<1||Math.abs(e.deltaX)>Math.abs(dy)){ return }
+      if((top&&dy<0)||(bot&&dy>0)){ acc+=Math.abs(dy); clearTimeout(accT); accT=setTimeout(()=>{ acc=0 },200); if(acc>14){ acc=0; play(top&&dy<0?'top':'bot') } } else acc=0
+    }
+    let ty=0, tOn=false
+    const ts=e=>{ if(window.innerWidth>760||blocked(e.target)) return; ty=e.touches[0].clientY; tOn=edge().bot }
+    const tm=e=>{ if(!tOn) return; if(e.touches[0].clientY-ty<-24 && edge().bot){ tOn=false; play('bot') } }
+    window.addEventListener('wheel',onWheel,{passive:true})
+    window.addEventListener('touchstart',ts,{passive:true}); window.addEventListener('touchmove',tm,{passive:true})
+    return ()=>{ clearTimeout(accT); window.removeEventListener('wheel',onWheel); window.removeEventListener('touchstart',ts); window.removeEventListener('touchmove',tm) }
+  },[])
+  return <div ref={glow} className="edge-glow bot" aria-hidden="true"/>
+}
+function PullRefresh(){
+  const busy=useRef(false); const el=useRef(null); const st=useRef({y:0,on:false,v:0,armed:false})
+  useEffect(()=>{
+    const MAX=120, GO=78
+    const node=()=>el.current
+    const paint=(v,smooth)=>{ const n=node(); if(!n) return; n.style.transition=smooth?'transform .28s cubic-bezier(.22,1,.36,1),opacity .22s':'none'; n.style.transform=`translate(-50%,${v-60}px)`; n.style.opacity=Math.min(1,v/46); const o=n.firstChild; if(o) o.style.transform=`rotate(${v*3.2}deg) scale(${.72+Math.min(1,v/GO)*.28})` }
+    const start=e=>{ if(window.innerWidth>760||busy.current) return; if((window.scrollY||document.documentElement.scrollTop)>0||document.querySelector('.modal-backdrop')) return; st.current={y:e.touches[0].clientY,on:true,v:0,armed:false} }
+    const move=e=>{ const s=st.current; if(!s.on) return; const dy=e.touches[0].clientY-s.y; if(dy<=0){ s.v=0; paint(0,false); return }
+      s.v=MAX*Math.tanh(dy/190); paint(s.v,false); const arm=s.v>=GO; if(arm!==s.armed){ s.armed=arm; node()?.classList.toggle('armed',arm) } }
+    const end=()=>{ const s=st.current; if(!s.on) return; s.on=false
+      if(s.v>=GO){ busy.current=true; paint(GO,true); node()?.classList.add('busy'); setTimeout(()=>window.location.reload(),800) } else paint(0,true) }
+    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:true}); window.addEventListener('touchend',end); window.addEventListener('touchcancel',end)
+    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
+  },[])
+  return <div className="ptr" ref={el} style={{opacity:0,transform:'translate(-50%,-60px)'}}><div className="ptr-orbit"><img src={LOGO} alt=""/></div></div>
+}
+
+function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
+  const [page,setPage]=useState(()=>{ const h=decodeURIComponent((window.location.hash||'').replace('#','')); if(h) return h; try{ return localStorage.getItem('sm-page')||'Dashboard' }catch{ return 'Dashboard' } })
+  const [deptFocus,setDeptFocus]=useState(null) // admin drill-down into a department (Members page only)
+  const [mobile,setMobile]=useState(false)
+  const [collapsed,setCollapsed]=useState(()=>{ try{ return localStorage.getItem('sm-collapsed')==='1' }catch{ return false } })
+  const [pwOpen,setPwOpen]=useState(false); const [installOpen,setInstallOpen]=useState(false); const install=useInstall()
+  async function installApp(){ if(!(await install.prompt())) setInstallOpen(true) }
+  const role=profile.role; const mode=roleMode(role)
+  // Text is protected from copying; only an admin can switch copying on, and it resets on every reload.
+  useEffect(()=>{ try{ if(sessionStorage.getItem('sm-logged')) return; sessionStorage.setItem('sm-logged','1') }catch{} supabase.rpc('log_activity',{p_action:'login',p_entity:'session',p_summary:''}).then(()=>{},()=>{}) },[])
+  useEffect(()=>{ const f=()=>document.documentElement.classList.toggle('scrolled',window.scrollY>4); f(); window.addEventListener('scroll',f,{passive:true}); return ()=>window.removeEventListener('scroll',f) },[])
+  const peekL=useRef(null), peekR=useRef(null)
+  const [semDef,setSemDef]=useState({edbo:'2',head:'2',staff:'2'})
+  const [loginMode,setLoginMode]=useState('session')
+  const [semPeriod,setSemPeriod]=useState(null)
+  async function loadSettings(){ const {data}=await supabase.from('app_settings').select('value').eq('key','default_sem').maybeSingle(); if(data&&data.value) setSemDef(d=>({...d,...data.value}))
+    const {data:lm}=await supabase.from('app_settings').select('value').eq('key','login_mode').maybeSingle(); const m=lm?.value?.mode==='remember'?'remember':'session'; setLoginMode(m); applyLoginMode(m)
+    const {data:sp}=await supabase.from('app_settings').select('value').eq('key','sem1_period').maybeSingle(); setSemPeriod(sp?.value?.from&&sp?.value?.to?{from:sp.value.from,to:sp.value.to}:null) }
+  useEffect(()=>{ loadSettings() },[])  // eslint-disable-line
+  usePoll(loadSettings,60000)
+  const settings=useMemo(()=>({ sem:semDef, loginMode, semPeriod, saveSemPeriod:async p=>{ setSemPeriod(p); const {error}=await supabase.from('app_settings').upsert({key:'sem1_period',value:p||{},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message); return !error }, saveLogin:async mode=>{ setLoginMode(mode); applyLoginMode(mode); const {error}=await supabase.from('app_settings').upsert({key:'login_mode',value:{mode},updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message) }, save:async(group,val)=>{ const next={...semDef,[group]:val}; setSemDef(next); const {error}=await supabase.from('app_settings').upsert({key:'default_sem',value:next,updated_at:new Date().toISOString(),updated_by:profile.id}); if(error) notifyDialog(error.message.includes('app_settings')?'Run supabase/control-center.sql in the Supabase SQL editor first.':error.message) } }),[semDef,loginMode,semPeriod,profile.id])
+  const [detail,setDetail]=useState(null)
+  const detailApi=useMemo(()=>({openEvent:id=>setDetail({kind:'event',id}),openTask:id=>setDetail({kind:'task',id})}),[])
+  const [allowCopy,setAllowCopy]=useState(false); const canCopy=role==='admin'&&allowCopy
+  useEffect(()=>{ document.documentElement.classList.toggle('allow-copy',canCopy); if(canCopy) return
+    const inField=t=>t&&t.closest&&t.closest('input,textarea,[contenteditable=true]')
+    const block=e=>{ if(!inField(e.target)) e.preventDefault() }
+    const evs=['copy','cut','contextmenu','selectstart','dragstart']; evs.forEach(n=>document.addEventListener(n,block))
+    return ()=>evs.forEach(n=>document.removeEventListener(n,block)) },[canCopy])
+  const adminLike=isAdminLike(role); const viewAll=seesAll(role)
+
+  const nav=useMemo(()=>{
+    const base=[['Dashboard',LayoutDashboard],['Calendar',CalendarDays],['Notifications',Bell],['Tracker',FolderKanban]]
+    if(seesAll(role)){ base.push(['Members',Users],['Resources',Link2]); if(adminLike) base.push(['Announcements',Megaphone]); if(role==='admin') base.push(['Settings',SettingsIcon],['Control Center',SlidersHorizontal],['Activity',ActivityIcon]); base.push(['Backup',Database]) }
+    else if(isHead(role)){ base.push(['Members',Users],['Resources',Link2],['Backup',Database]) }
+    else base.push(['Resources',Link2])
+    return base
+  },[role])
+
+  // Browser back button: step back through visited pages; stepping back past the first one logs out.
+  useEffect(()=>{ window.history.replaceState({page},'','#'+page) },[])  // eslint-disable-line
+  useEffect(()=>{ try{ localStorage.setItem('sm-page',page) }catch{} },[page])
+  useEffect(()=>{ if(!nav.some(n=>n[0]===page)) setPage('Dashboard') },[nav,page])
+  useEffect(()=>{
+    function onPop(e){ const st=e.state; if(st && st.page){ setPage(st.page); setDeptFocus(null) } else { supabase.auth.signOut() } }
+    window.addEventListener('popstate',onPop); return ()=>window.removeEventListener('popstate',onPop)
+  },[])
+  const navRef=useRef(null); const [pill,setPill]=useState({top:0,h:0,anim:false})
+  useEffect(()=>{
+    const measure=()=>{ const a=navRef.current&&navRef.current.querySelector('.nav-item.active'); if(a) setPill(p=>({top:a.offsetTop,h:a.offsetHeight,anim:p.anim})) }
+    measure(); const t1=setTimeout(measure,400), t2=setTimeout(()=>setPill(p=>({...p,anim:true})),120)
+    window.addEventListener('resize',measure); return ()=>{ clearTimeout(t1); clearTimeout(t2); window.removeEventListener('resize',measure) }
+  },[page,nav])
+  const tabRef=useRef(null); const [tabPill,setTabPill]=useState({left:0,w:0,anim:false})
+  useEffect(()=>{
+    const measure=()=>{ const a=tabRef.current&&tabRef.current.querySelector('.mobile-tab.active'); if(a) setTabPill(p=>({left:a.offsetLeft,w:a.offsetWidth,anim:p.anim})) }
+    measure(); const ts=[60,200,420].map(ms=>setTimeout(measure,ms)); const t2=setTimeout(()=>setTabPill(p=>({...p,anim:true})),150)
+    window.addEventListener('resize',measure); return ()=>{ ts.forEach(clearTimeout); clearTimeout(t2); window.removeEventListener('resize',measure) }
+  },[page,nav])
+  const [dir,setDir]=useState('')
+  function goPage(n){ const a=nav.findIndex(x=>x[0]===page), b=nav.findIndex(x=>x[0]===n); setDir(b>a?'from-right':b<a?'from-left':''); setPage(n); setDeptFocus(null); setMobile(false); window.history.pushState({page:n},'','#'+n) }
+  // Phone: swipe left/right anywhere on the page to move to the next/previous section.
+  const swipe=useRef({}); swipe.current={nav,page,goPage}
+  useEffect(()=>{
+    let x0=0,y0=0,ok=false,mode=null,el=null
+    const blocked=t=>{ if(!t||!t.closest) return true; if(t.closest('input,textarea,select,.modal-backdrop,.notif-dropdown,.sel-list,.mobile-tabbar,.calendar-grid')) return true
+      for(let n=t;n&&n!==document.body;n=n.parentElement){ if(n.scrollWidth>n.clientWidth+4){ const ox=getComputedStyle(n).overflowX; if(ox==='auto'||ox==='scroll') return true } } return false }
+    const idx=()=>{ const {nav,page}=swipe.current; return nav.findIndex(n=>n[0]===page) }
+    const start=e=>{ if(el){ el.style.transform=''; el.style.opacity=''; el.style.transition=''; el.style.willChange='' } ok=window.innerWidth<=760 && e.touches.length===1 && !blocked(e.target); mode=null; x0=e.touches[0].clientX; y0=e.touches[0].clientY; el=document.querySelector('.content') }
+    const move=e=>{ if(!ok||!el) return; const dx=e.touches[0].clientX-x0, dy=e.touches[0].clientY-y0
+      if(!mode){ if(Math.abs(dx)<10&&Math.abs(dy)<10) return; mode=Math.abs(dx)>Math.abs(dy)*1.3?'h':'v'; if(mode==='h'){ el.style.animation='none'; el.style.transition='none'; el.style.willChange='transform,opacity' } }
+      if(mode!=='h') return
+      const {nav}=swipe.current; const i=idx(); const none=(dx<0&&i>=nav.length-1)||(dx>0&&i<=0); const d=none?dx*.22:dx
+      el.style.transform=`translateX(${d}px)`; el.style.opacity=String(1-Math.min(.55,Math.abs(d)/window.innerWidth*.7)); if(e.cancelable) e.preventDefault()
+      const L=peekL.current, R=peekR.current; const a=Math.abs(d); const on=!none?(dx>0?L:R):null; [L,R].forEach(n=>{ if(n&&n!==on){ n.style.width='0px'; n.style.opacity='0' } })
+      if(on){ on.style.transition='none'; on.style.width=a+'px'; on.style.opacity=String(Math.min(1,a/80)); on.style.setProperty('--k',String(Math.min(1,a/(window.innerWidth*.28)))) } }
+    const end=e=>{ if(!ok||!el) return; ok=false; if(mode!=='h') return
+      const dx=e.changedTouches[0].clientX-x0; const {nav,goPage}=swipe.current; const i=idx(); const j=i+(dx<0?1:-1); const W=window.innerWidth
+      ;[peekL.current,peekR.current].forEach(n=>{ if(n){ n.style.transition='width .45s cubic-bezier(.22,1,.36,1),opacity .35s'; n.style.width='0px'; n.style.opacity='0' } })
+      if(Math.abs(dx)>Math.min(110,W*.28) && j>=0 && j<nav.length){ el.style.transition='transform .3s cubic-bezier(.4,0,.2,1),opacity .3s'; el.style.transform=`translateX(${dx<0?-W*.6:W*.6}px)`; el.style.opacity='0'; const n=nav[j][0]; setTimeout(()=>goPage(n),240) }
+      else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1),opacity .55s'; el.style.transform=''; el.style.opacity='' } }
+    window.addEventListener('touchstart',start,{passive:true}); window.addEventListener('touchmove',move,{passive:false}); window.addEventListener('touchend',end,{passive:true}); window.addEventListener('touchcancel',end,{passive:true})
+    return ()=>{ window.removeEventListener('touchstart',start); window.removeEventListener('touchmove',move); window.removeEventListener('touchend',end); window.removeEventListener('touchcancel',end) }
+  },[])
+  // keep the active tab centred in the bottom bar — scrolls only the bar itself, never the page
+  useEffect(()=>{ const bar=tabRef.current; const a=bar&&bar.querySelector('.mobile-tab.active'); if(!bar||!a) return
+    const t=setTimeout(()=>{ bar.scrollTo({left:Math.max(0,a.offsetLeft-(bar.clientWidth-a.offsetWidth)/2),behavior:'smooth'}) },140); return ()=>clearTimeout(t) },[page])
+  useEffect(()=>{ const fix=()=>{ if(window.scrollX) window.scrollTo(0,window.scrollY) }; window.addEventListener('scroll',fix,{passive:true}); return ()=>window.removeEventListener('scroll',fix) },[])
+  function onNavClick(n){ if(n===page){ toggleCollapsed() } else { goPage(n) } }
+  function toggleCollapsed(){ setCollapsed(c=>{ try{ localStorage.setItem('sm-collapsed', c?'0':'1') }catch{}; return !c }) }
+
+  async function logout(){ try{ await supabase.rpc('log_activity',{p_action:'logout',p_entity:'session',p_summary:''}); sessionStorage.removeItem('sm-logged') }catch{} const r=document.documentElement; r.classList.add('app-leaving'); await new Promise(res=>setTimeout(res,560)); await supabase.auth.signOut(); try{ localStorage.removeItem('sm-page'); window.history.replaceState(null,'',window.location.pathname+window.location.search) }catch{} r.classList.remove('app-leaving') }
+
+  return <SettingsCtx.Provider value={settings}><DetailCtx.Provider value={detailApi}><div className="app">
+    <aside className={`sidebar ${mobile?'open':''} ${collapsed?'collapsed':''}`}>
+      <div className="brand">
+        <img className="brand-mark" src={LOGO} alt="Silang Memoirs"/>
+        <div className="sb-text"><div className="brand-name">Silang Memoirs</div><div className="brand-sub">{EDITION.toUpperCase()}</div></div>
+      </div>
+      <div className="nav-label sb-text">WORKSPACE</div>
+      <nav ref={navRef}><span className={`nav-pill ${pill.anim?'anim':''}`} style={{top:pill.top,height:pill.h,opacity:pill.h?1:0}}/>{nav.map(([n,I])=><button key={n} className={`nav-item ${page===n?'active':''}`} onClick={()=>onNavClick(n)} title={n}><I size={18} className="nav-ic"/><span className="sb-text">{n}</span>{page===n && <ChevronRight size={15} className="nav-arrow sb-text"/>}</button>)}</nav>
+      <div className="sidebar-bottom">
+        <div className="profile-mini">
+          <Avatar cls="avatar" url={profile.avatar_url} name={profile.full_name}/>
+          <div className="sb-text"><strong>{profile.full_name}</strong><span>{roleLabel(profile)}</span></div>
+        </div>
+        {!install.installed && <button className="password-link full-width sb-text install-link" onClick={installApp} tabIndex={collapsed?-1:0}><Download size={13}/> Install app</button>}
+        <button className="password-link full-width sb-text" onClick={()=>setPwOpen(true)} tabIndex={collapsed?-1:0}>Change password</button>
+        <button className="nav-item logout" onClick={logout} title="Log out"><LogOut size={18} className="nav-ic"/><span className="sb-text">Log out</span></button>
+      </div>
+    </aside>
+    {mobile && <div className="backdrop" onClick={()=>setMobile(false)}/>}
+    <main className={`main ${collapsed?'sidebar-collapsed':''}`}>
+      <header className="topbar">
+        <div className="mobile-account">
+          <Avatar cls="avatar" url={profile.avatar_url} name={profile.full_name}/>
+          <div><strong>{profile.full_name}</strong><span>{roleLabel(profile)}</span></div>
+          <button className="icon-btn" onClick={logout} title="Log out"><LogOut size={16}/></button>
+        </div>
+        <div className="crumb"><span>Silang Memoirs</span><ChevronRight size={14}/><strong>{deptFocus?deptFocus:page}</strong></div>
+        <div className="top-actions">
+          {!install.installed && <button className="icon-btn install-top" onClick={installApp} title="Install app"><Download size={16}/></button>}
+          <ThemeToggle theme={theme} onToggle={toggleTheme}/>
+          <NotificationBell profile={profile}/>
+        </div>
+      </header>
+      <AnnouncementTicker profile={profile}/>
+      <NotificationTicker profile={profile} onOpen={()=>goPage('Notifications')}/>
+      <div className={`content page-enter ${dir}`} key={page+String(deptFocus)}>
+        {page==='Dashboard' && viewAll && <AdminDashboard profile={profile}/>}
+        {page==='Dashboard' && !viewAll && mode==='hours' && <HoursDashboard profile={profile}/>}
+        {page==='Dashboard' && !viewAll && mode==='tasks' && <TasksDashboard profile={profile}/>}
+
+        {page==='Calendar' && <CalendarPage profile={profile}/>}
+        {page==='Notifications' && <NotificationsPage profile={profile}/>}
+        {page==='Tracker' && (mode==='tasks'||viewAll) && <TaskTracker profile={profile}/>}
+        {page==='Tracker' && mode==='hours' && !viewAll && <Tracker profile={profile}/>}
+        {page==='Members' && <Members profile={profile}/>}
+        {page==='Resources' && <Resources profile={profile}/>}
+        {page==='Announcements' && adminLike && <Announcements profile={profile}/>}
+        {page==='Settings' && role==='admin' && <Settings profile={profile}/>}
+        {page==='Control Center' && role==='admin' && <ControlPage/>}
+        {page==='Activity' && role==='admin' && <ActivityPage/>}
+        {page==='Backup' && <Backup profile={profile}/>}
+      </div>
+    </main>
+    <PullRefresh/>
+    <EdgeBounce/>
+    {(()=>{ const i=nav.findIndex(n=>n[0]===page); const P=nav[i-1], N=nav[i+1]; return <>
+      <div className="swipe-peek left" ref={peekL}>{P && <div className="pk-in">{(()=>{ const I=P[1]; return <I size={26}/> })()}<span>{P[0]}</span></div>}</div>
+      <div className="swipe-peek right" ref={peekR}>{N && <div className="pk-in">{(()=>{ const I=N[1]; return <I size={26}/> })()}<span>{N[0]}</span></div>}</div></> })()}
+    {role==='admin' && <button type="button" className={`copy-toggle ${canCopy?'on':''}`} onClick={()=>setAllowCopy(v=>!v)} title="Allow copying text (admin only, resets on reload)"><Copy size={12}/> {canCopy?'Copy on':'Copy off'}</button>}
+    <nav className="mobile-tabbar" ref={tabRef}><span className={`tab-pill ${tabPill.anim?'anim':''}`} style={{left:tabPill.left,width:tabPill.w,opacity:tabPill.w?1:0}}/>{nav.map(([n,I])=><button key={n} className={`mobile-tab ${page===n?'active':''}`} onClick={()=>goPage(n)}><I size={19}/>{page===n && <span>{n}</span>}</button>)}</nav>
+    {pwOpen && <PasswordModal onClose={()=>setPwOpen(false)}/>}
+    {installOpen && <InstallModal onClose={()=>setInstallOpen(false)}/>}
+    <DialogHost/>
+      {detail?.kind==='event' && <EventDetailModal id={detail.id} profile={profile} onClose={()=>setDetail(null)}/>}
+    {detail?.kind==='task' && <TaskDetailModal id={detail.id} onClose={()=>setDetail(null)}/>}
+  </div></DetailCtx.Provider></SettingsCtx.Provider>
+}
+
+const ACT_ENTITY={schedules:'event',schedule_members:'event',tasks:'task',profiles:'member',resources:'resource',announcements:'announcement',app_settings:'setting',session:'session'}
+const ACT_ENTITY_FILTER=[['','All'],['schedules','Events'],['tasks','Tasks'],['profiles','Members'],['resources','Resources'],['announcements','Announcements'],['app_settings','Settings'],['session','Sign-ins']]
+const ACT_ACTION_FILTER=[['','All'],['created','Added'],['edited','Edited'],['deleted','Deleted'],['completed','Completed'],['sorted','Sorted'],['posted','Posted'],['status','Status'],['login','Log in'],['logout','Log out']]
+function actSentence(r){
+  const t=`“${r.summary||''}”`; const e=ACT_ENTITY[r.entity]||r.entity
+  switch(r.action){
+    case 'login': return 'logged in'; case 'logout': return 'logged out'
+    case 'created': return <>added {e} <b>{t}</b></>; case 'edited': return <>edited {e} <b>{t}</b></>; case 'deleted': return <>deleted {e} <b>{t}</b></>
+    case 'completed': return <>completed task <b>{t}</b></>; case 'sorted': return <>sorted <b>{t}</b></>; case 'posted': return <>marked <b>{t}</b> as posted</>
+    case 'status': return <>moved <b>{t}</b></>; default: return <>{r.action} <b>{t}</b></>
   }
-  if(new URL(req.url).origin!==self.location.origin) return
-  e.respondWith((async()=>{
-    try{ const res=await fetch(req); if(res.ok){ const c=await caches.open(CACHE); c.put(req,res.clone()) } return res }
-    catch{ const hit=await caches.match(req); if(hit) return hit; if(req.mode==='navigate'){ const home=await caches.match('/'); if(home) return home } throw new Error('offline') }
-  })())
-})
+}
+function ActivityPage(){
+  const [rows,setRows]=useState([]); const [loaded,setLoaded]=useState(false); const [q,setQ]=useState(''); const [act,setAct]=useState(''); const [ent,setEnt]=useState(''); const [date,setDate]=useState(''); const [err,setErr]=useState(''); const [pf,setPf]=useState({})
+  useEffect(()=>{ fetchProfiles().then(l=>setPf(Object.fromEntries(l.map(x=>[x.id,x])))) },[])
+  async function load(){ const {data,error}=await supabase.from('activity_log').select('*').order('at',{ascending:false}).limit(400); if(error){ setErr(error.message) } else { setErr(''); setRows(data||[]) } setLoaded(true) }
+  useEffect(()=>{ load() },[]); usePoll(load,20000)
+  const shown=rows.filter(r=>(!act||r.action===act)&&(!ent||r.entity===ent||(ent==='schedules'&&r.entity==='schedule_members'))&&(!date||localISO(r.at)===date)&&(!q||(`${r.actor_name} ${r.summary} ${r.action}`).toLowerCase().includes(q.toLowerCase())))
+  const groups=[]; shown.forEach(r=>{ const k=localISO(r.at); let g=groups[groups.length-1]; if(!g||g.k!==k){ g={k,items:[]}; groups.push(g) } g.items.push(r) })
+  const dotCls=a=>a==='deleted'?'bad':a==='login'||a==='logout'?'dim':a==='completed'||a==='sorted'||a==='posted'?'good':a==='created'?'gold':'mid'
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Activity</h1><p>Who logged in, and who added, edited or removed things — newest first.</p></div></section>
+    <FilterBar search={q} onSearch={setQ} date={date} onDate={setDate} onClear={()=>{ setQ(''); setDate(''); setAct(''); setEnt('') }} extraActive={!!(act||ent)} placeholder="Search a name or item…">
+      <label>Type<Select value={act} onChange={e=>setAct(e.target.value)}>{ACT_ACTION_FILTER.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label>
+      <label>Where<Select value={ent} onChange={e=>setEnt(e.target.value)}>{ACT_ENTITY_FILTER.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></label>
+    </FilterBar>
+    {err && <div className="panel" style={{padding:18,color:'var(--text-dim)',fontSize:13}}>Couldn’t load the log. Run <b>supabase/activity.sql</b> in the Supabase SQL editor first. <small>({err})</small></div>}
+    {!err && loaded && !shown.length && <div className="panel empty" style={{padding:30}}>No activity yet.</div>}
+    {groups.map(g=><div className="act-day" key={g.k}>
+      <div className="act-day-h">{fmtDay(g.k)}<span>{g.items.length}</span></div>
+      <div className="panel act-list">{g.items.map(r=><div className="act-row" key={r.id}>
+        <span className={`act-dot ${dotCls(r.action)}`}/>
+        <Avatar cls="avatar sm" url={pf[r.actor_id]?.avatar_url} name={r.actor_name||'S'}/>
+        <div className="act-main"><span className="act-text"><strong>{r.actor_name||'System'}</strong> {actSentence(r)}</span></div>
+        <time>{fmtTime(r.at)}</time>
+      </div>)}</div>
+    </div>)}
+  </div>
+}
 
-self.addEventListener('push',e=>{
-  let d={}; try{ d=e.data?e.data.json():{} }catch{ d={title:'Silang Memoirs',body:e.data?e.data.text():''} }
-  e.waitUntil(self.registration.showNotification(d.title||'Silang Memoirs',{ body:d.body||'', icon:'/icon-192.png', badge:'/icon-192.png', data:{url:d.url||'/'}, tag:'sm-'+(d.title||'')+(d.body||'').slice(0,30) }))
-})
-self.addEventListener('notificationclick',e=>{
-  e.notification.close(); const url=(e.notification.data&&e.notification.data.url)||'/'
-  e.waitUntil((async()=>{
-    const list=await self.clients.matchAll({type:'window',includeUncontrolled:true})
-    for(const c of list){ if('focus' in c){ await c.focus(); if('navigate' in c){ try{ await c.navigate(url) }catch{} } return } }
-    if(self.clients.openWindow) await self.clients.openWindow(url)
-  })())
-})
+function ControlPage(){
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Control center</h1><p>Change app-wide defaults from here — no code needed.</p></div></section>
+    <ControlCenter/>
+  </div>
+}
+
+/* ---------------- Notifications ---------------- */
+function NotificationBell({profile}){
+  const [open,setOpen]=useState(false); const [rows,setRows]=useState([]); const wrap=useRef(null); const drop=useRef(null)
+  // Clicking anywhere else (or pressing Esc) closes the notification box.
+  useEffect(()=>{ if(!open) return; const away=e=>{ if(wrap.current && !wrap.current.contains(e.target) && !(drop.current && drop.current.contains(e.target))) setOpen(false) }; const esc=e=>{ if(e.key==='Escape') setOpen(false) }
+    document.addEventListener('mousedown',away); document.addEventListener('touchstart',away); document.addEventListener('keydown',esc)
+    return ()=>{ document.removeEventListener('mousedown',away); document.removeEventListener('touchstart',away); document.removeEventListener('keydown',esc) } },[open])
+  useEffect(()=>{ load(); const t=setInterval(load,45000); return ()=>clearInterval(t) },[profile.id])
+  async function load(){ const {data}=await supabase.from('notifications').select('*').eq('user_id',profile.id).eq('read',false).order('created_at',{ascending:false}).limit(25); setRows(data||[]) }
+  async function markRead(id){ setRows(r=>r.filter(x=>x.id!==id)); await supabase.from('notifications').update({read:true}).eq('id',id) }
+  async function markAllRead(){ const ids=rows.map(r=>r.id); if(!ids.length) return; setRows([]); await supabase.from('notifications').update({read:true}).in('id',ids) }
+  return <div className="notif-wrap" ref={wrap}>
+    <button className={`icon-btn ${rows.length>0?'bell-ring':''}`} onClick={()=>setOpen(o=>!o)}><Bell size={16}/>{rows.length>0 && <span className="notif-dot">{rows.length>9?'9+':rows.length}</span>}</button>
+    {open && createPortal(<div className="notif-dropdown" ref={drop}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'4px 6px 10px'}}><strong style={{fontSize:12}}>Notifications</strong>{rows.length>0 && <button className="text-btn" onClick={markAllRead}>Mark all read</button>}</div>
+      {!rows.length && <div className="notif-empty"><BellOff size={20}/><span>You're all caught up.</span></div>}
+      {rows.map(r=><button key={r.id} className={`notif-item unread`} onClick={()=>markRead(r.id)}>
+        <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
+      </button>)}
+    </div>,document.body)}
+  </div>
+}
+
+// Running banner under the top bar. Reads the announcements table directly (not notifications). Tap = read them in a popup, X = hide until the next one.
+function forMe(a,profile){ return a.audience==='all'||(a.audience==='heads'&&isHead(profile.role))||(a.audience==='staff'&&isStaff(profile.role))||(a.audience==='custom'&&(a.target_user_ids||[]).includes(profile.id))||a.sender_id===profile.id||isAdminLike(profile.role) }
+function AnnouncementTicker({profile}){
+  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-ticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false); const [open,setOpen]=useState(false)
+  async function load(){
+    const since=new Date(Date.now()-7*864e5).toISOString()
+    const {data}=await supabase.from('announcements').select('id,title,body,audience,target_user_ids,sender_id,created_at').gte('created_at',since).order('created_at',{ascending:false}).limit(20)
+    setItems((data||[]).filter(a=>forMe(a,profile)).slice(0,5))
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load,60000)  // eslint-disable-line
+  const latest=items[0]?.id||''
+  if(!items.length || hidden===latest) return null
+  const clip=t=>t&&t.length>140?t.slice(0,137)+'…':t
+  const line=items.map(a=>`${a.title}${a.body?` — ${clip(a.body)}`:''}`)
+  const chars=line.join('').length
+  function close(e){ e.stopPropagation(); setClosing(true); setTimeout(()=>{ try{ sessionStorage.setItem('sm-ticker-x',latest) }catch{}; setHidden(latest) },420) }
+  const Track=({aria})=><span className="ticker-set" aria-hidden={aria}>{line.map((t,i)=><span className="ticker-item" key={i}>{t}<i className="ticker-dot"/></span>)}</span>
+  return <><div className={`ticker ${closing?'closing':''}`} role="button" tabIndex={0} onClick={()=>setOpen(true)} onKeyDown={e=>{ if(e.key==='Enter') setOpen(true) }} title="Read announcements">
+    <span className="ticker-tag"><Megaphone size={13}/> <b>Announcement</b></span>
+    <div className="ticker-view"><div className="ticker-track" style={{'--dur':`${Math.max(20,Math.round(chars*0.24))}s`}}><Track/><Track aria={true}/></div></div>
+    <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
+  </div>
+  {open && <Modal title="Announcements" onClose={()=>setOpen(false)}><div className="ann-list">{items.map(a=><div className="ann-item" key={a.id}><strong>{a.title}</strong>{a.body && <p>{a.body}</p>}<small>{new Date(a.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div>)}</div></Modal>}
+  </>
+}
+// Same running banner for unread notifications (tasks, events, etc.). Tap = open Notifications, X = hide until a newer one arrives.
+function NotificationTicker({profile,onOpen}){
+  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-nticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false)
+  async function load(){
+    const {data}=await supabase.from('notifications').select('id,title,body,kind,created_at').eq('user_id',profile.id).eq('read',false).neq('kind','announcement').order('created_at',{ascending:false}).limit(5)
+    setItems(data||[])
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load,30000)  // eslint-disable-line
+  const latest=items[0]?.id||''
+  if(!items.length || hidden===latest) return null
+  const clip=t=>t&&t.length>120?t.slice(0,117)+'…':t
+  const line=items.map(a=>`${a.title}${a.body?` — ${clip(a.body)}`:''}`)
+  const chars=line.join('').length
+  function close(e){ e.stopPropagation(); setClosing(true); setTimeout(()=>{ try{ sessionStorage.setItem('sm-nticker-x',latest) }catch{}; setHidden(latest) },420) }
+  const Track=({aria})=><span className="ticker-set" aria-hidden={aria}>{line.map((t,i)=><span className="ticker-item" key={i}>{t}<i className="ticker-dot"/></span>)}</span>
+  return <div className={`ticker noti ${closing?'closing':''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={e=>{ if(e.key==='Enter') onOpen() }} title="Open notifications">
+    <span className="ticker-tag"><Bell size={13}/> <b>Notification{items.length>1?`s · ${items.length}`:''}</b></span>
+    <div className="ticker-view"><div className="ticker-track" style={{'--dur':`${Math.max(20,Math.round(chars*0.24))}s`}}><Track/><Track aria={true}/></div></div>
+    <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
+  </div>
+}
+// Phone / iPad / desktop alerts: asks permission, saves this device so the server can push to it even when the site is closed.
+const VAPID_PUBLIC='BIeA5ylhb9dPP1-aCS5n0u73qNC--02gIrw4m237F-VkfhYtjAHOaZslIrTTivyIeDTcSwrOk3cZLTJCjcE30Xk'
+function b64ToU8(b){ const p='='.repeat((4-b.length%4)%4); const r=atob((b+p).replace(/-/g,'+').replace(/_/g,'/')); return Uint8Array.from([...r].map(c=>c.charCodeAt(0))) }
+function PushToggle({profile}){
+  const [st,setSt]=useState('checking'); const [busy,setBusy]=useState(false)
+  const ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)
+  const standalone=window.navigator.standalone||window.matchMedia?.('(display-mode: standalone)').matches
+  useEffect(()=>{ (async()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){ setSt(ios&&!standalone?'install':'unsupported'); return }
+    if(Notification.permission==='denied'){ setSt('denied'); return }
+    try{ const reg=await navigator.serviceWorker.getRegistration(); const sub=reg&&await reg.pushManager.getSubscription(); setSt(sub&&Notification.permission==='granted'?'on':'off') }catch{ setSt('off') }
+  })() },[]) // eslint-disable-line
+  async function turnOn(){
+    setBusy(true)
+    try{
+      const perm=await Notification.requestPermission(); if(perm!=='granted'){ setSt(perm==='denied'?'denied':'off'); setBusy(false); return }
+      const reg=await navigator.serviceWorker.ready
+      const sub=(await reg.pushManager.getSubscription())||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(VAPID_PUBLIC)})
+      const j=sub.toJSON()
+      const {error}=await supabase.from('push_subscriptions').upsert({user_id:profile.id,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,user_agent:navigator.userAgent.slice(0,200)},{onConflict:'endpoint'})
+      if(error) throw error
+      setSt('on')
+    }catch(e){ notifyDialog(String(e.message||e).includes('push_subscriptions')?'Run supabase/push.sql in the Supabase SQL editor first.':'Could not turn on alerts: '+(e.message||e)) }
+    setBusy(false)
+  }
+  async function turnOff(){
+    setBusy(true)
+    try{ const reg=await navigator.serviceWorker.getRegistration(); const sub=reg&&await reg.pushManager.getSubscription(); if(sub){ await supabase.from('push_subscriptions').delete().eq('endpoint',sub.endpoint); await sub.unsubscribe() } setSt('off') }catch{}
+    setBusy(false)
+  }
+  if(st==='checking') return null
+  const note={install:'On iPhone / iPad: tap Share → Add to Home Screen, then open the app from the icon to turn on alerts.',unsupported:'This browser cannot receive alerts.',denied:'Alerts are blocked. Allow notifications for this site in your browser settings, then reload.'}[st]
+  return <div className="push-box">
+    {st==='on' ? <button type="button" className="secondary-btn" disabled={busy} onClick={turnOff}><Bell size={16}/> Alerts on this device: ON — turn off</button>
+      : st==='off' ? <button type="button" className="primary-btn" disabled={busy} onClick={turnOn}><Bell size={16}/> {busy?'Turning on…':'Turn on alerts'}</button> : null}
+    {note && <small className="push-note">{note}</small>}
+  </div>
+}
+function NotificationsPage({profile}){
+  const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
+  useEffect(()=>{ load() },[profile.id])
+  async function load(){ setLoading(true); const {data}=await supabase.from('notifications').select('*').eq('user_id',profile.id).order('created_at',{ascending:false}).limit(200); setRows(data||[]); setLoading(false) }
+  async function markRead(id){ await supabase.from('notifications').update({read:true}).eq('id',id); load() }
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">STAY IN THE LOOP</div><h1>Notifications</h1><p>Every task and event sent your way. Turn on alerts to get them on this device even when the site is closed.</p></div><PushToggle profile={profile}/></section>
+    <div className="panel">
+      {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
+        <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
+      </div>)}
+      {!loading && !rows.length && <div className="empty">Nothing here yet.</div>}
+    </div>
+  </div>
+}
+
+/* ---------------- Confirm dialog (replaces native confirm()/alert() everywhere) ---------------- */
+function ConfirmModal({title='Are you sure?',body,danger,confirmLabel='Confirm',onConfirm,onClose}){
+  return <Modal title={title} onClose={onClose}>
+    {body && <p style={{color:'var(--text-dim)',fontSize:13,lineHeight:1.6,marginTop:-6}}>{body}</p>}
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button>
+      <button className={danger?'danger-btn':'primary-btn'} onClick={()=>{ onConfirm(); onClose() }}>{confirmLabel}</button></div>
+  </Modal>
+}
+function AlertModal({title='Notice',body,onClose}){
+  return <Modal title={title} onClose={onClose}><p style={{color:'var(--text-dim)',fontSize:13,lineHeight:1.6,marginTop:-6}}>{body}</p>
+    <div className="modal-actions"><button className="primary-btn" onClick={onClose}>OK</button></div></Modal>
+}
+// Lightweight app-wide confirm/alert, avoiding window.confirm()/alert() browser chrome.
+let _dialogSetter=null
+function DialogHost(){
+  const [dialog,setDialog]=useState(null)
+  useEffect(()=>{ _dialogSetter=setDialog; return ()=>{ _dialogSetter=null } },[])
+  if(!dialog) return null
+  function close(){ dialog.onCancel?.(); setDialog(null) }
+  if(dialog.kind==='confirm') return <ConfirmModal {...dialog} onClose={close}/>
+  return <AlertModal {...dialog} onClose={close}/>
+}
+function confirmDialog({title,body,danger,confirmLabel}={}){ return new Promise(resolve=>{ if(!_dialogSetter){ resolve(window.confirm(body||title||'Are you sure?')); return } _dialogSetter({ kind:'confirm', title, body, danger, confirmLabel, onConfirm:()=>resolve(true), onCancel:()=>resolve(false) }) }) }
+function notifyDialog(body,title){ if(!_dialogSetter){ window.alert(body); return } _dialogSetter({ kind:'alert', title:title||'Notice', body }) }
+
+/* ---------------- Password change (self service) ---------------- */
+function PasswordModal({onClose}){
+  const [p1,setP1]=useState(''); const [p2,setP2]=useState(''); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState('')
+  async function save(e){ e.preventDefault(); if(p1.length<6){ setMsg('Password must be at least 6 characters.'); return } if(p1!==p2){ setMsg("Passwords don't match."); return } setBusy(true); const {error}=await supabase.auth.updateUser({password:p1}); setBusy(false); if(error) setMsg(error.message); else { setMsg('Password updated.'); setTimeout(onClose,900) } }
+  return <Modal title="Change password" onClose={onClose}><form onSubmit={save}>
+    <label>New password<input type="password" value={p1} onChange={e=>setP1(e.target.value)} required minLength={6}/></label>
+    <label>Confirm new password<input type="password" value={p2} onChange={e=>setP2(e.target.value)} required minLength={6}/></label>
+    {msg && <div className="error" style={{background:'var(--surface-2)',color:'var(--text)',borderColor:'var(--border)'}}>{msg}</div>}
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Update password'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Stat + Modal shared ---------------- */
+// Numbers count up smoothly from 0 (and from the old number to the new one when data changes).
+function CountUp({value,dur=1500}){
+  const raw=String(value??''); const m=raw.match(/^(-?\d+(?:\.\d+)?)(.*)$/)
+  const num=m?parseFloat(m[1]):null; const dec=m&&m[1].includes('.')?m[1].split('.')[1].length:0; const suf=m?m[2]:''
+  const [st,setSt]=useState({v:0,p:0}); const from=useRef(0)
+  useEffect(()=>{
+    if(num===null) return
+    if(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches){ from.current=num; setSt({v:num,p:1}); return }
+    const t0=performance.now(), a=from.current; let raf
+    const tick=t=>{ const p=Math.min(1,(t-t0)/dur); const e=1-Math.pow(1-p,4); const cur=a+(num-a)*e; from.current=cur; setSt({v:cur,p:e}); if(p<1) raf=requestAnimationFrame(tick) }
+    raf=requestAnimationFrame(tick); return ()=>cancelAnimationFrame(raf)
+  },[num,dur])
+  if(num===null) return <>{raw}</>
+  const k=1-st.p   // blurry while it is moving, sharp when it lands
+  return <span className="count" style={{filter:k>.01?`blur(${(k*3.2).toFixed(2)}px)`:'none',opacity:.55+.45*st.p}}>{st.v.toFixed(dec)}{suf}</span>
+}
+function Stat({title,value,note,icon:Icon}){ return <div className="stat-card"><div className="stat-top"><span>{title}</span><Icon size={16}/></div><strong><CountUp value={value}/></strong><small>{note}</small></div> }
+
+// Admin-controlled defaults (Control Center): which semester each group sees first.
+const SettingsCtx=createContext({sem:{edbo:'2',head:'2',staff:'2'},save:async()=>{}})
+function semGroup(role){ return role==='staff_media'||role==='staff_colorist'?'staff':role==='head_media'||role==='head_colorist'?'head':'edbo' }
+function useSem(role){ const ctx=useContext(SettingsCtx); const [v,setV]=useState(null); return [v??ctx.sem[semGroup(role)]??'2', setV] }
+function ControlCenter(){
+  const ctx=useContext(SettingsCtx)
+  const rows=[['edbo','EDBO board','EIC, AEIC, Art Director and the rest of the board (Admin follows this too)'],['head','Heads','Head Media and TD'],['staff','Staff','Media and Colorist staff']]
+  return <div className="panel control-center">
+    <div className="panel-title"><h2>Default semester view</h2></div>
+    <p className="cc-note">Pick which semester each group sees first. They can still switch it themselves; this only sets what they land on.</p>
+    {rows.map(([k,label,sub])=><div className="cc-row" key={k}><div><strong>{label}</strong><span>{sub}</span></div><SemSwitch value={ctx.sem[k]||'2'} onChange={v=>ctx.save(k,v)}/></div>)}
+    <div className="panel-title" style={{marginTop:26}}><h2>Login</h2></div>
+    <p className="cc-note">Choose how long people stay logged in. This applies to everyone, and takes effect the next time they open the app.</p>
+    <div className="cc-row"><div><strong>Stay logged in?</strong><span>{ctx.loginMode==='remember'?'Remember me: people stay signed in on their device until they log out.':'Log in every visit: closing the tab or app signs people out.'}</span></div>
+      <Seg value={ctx.loginMode||'session'} onChange={v=>ctx.saveLogin(v)} options={[['session','Log in every visit'],['remember','Remember me']]}/></div>
+    <SemPeriod/>
+    <SheetLinks/>
+  </div>
+}
+const DAYS_IN=[31,29,31,30,31,30,31,31,30,31,30,31]
+function SemPeriod(){
+  const ctx=useContext(SettingsCtx); const p=ctx.semPeriod
+  const parse=v=>v?{m:Number(v.slice(0,2)),d:Number(v.slice(3,5))}:{m:8,d:1}
+  const [f,setF]=useState(parse(p?.from)), [t,setT]=useState(parse(p?.to||'12-31')); const [busy,setBusy]=useState(false); const [msg,setMsg]=useState('')
+  useEffect(()=>{ if(p){ setF(parse(p.from)); setT(parse(p.to)) } },[p?.from,p?.to])  // eslint-disable-line
+  const pad=n=>String(n).padStart(2,'0'); const val=x=>`${pad(x.m)}-${pad(x.d)}`
+  const fix=x=>({...x,d:Math.min(x.d,DAYS_IN[x.m-1])})
+  const Pick=({v,set})=><span className="sp-pick"><Select value={String(v.m)} onChange={e=>set(fix({...v,m:Number(e.target.value)}))}>{MONTHS.map((n,i)=><option key={n} value={String(i+1)}>{n}</option>)}</Select><Select value={String(v.d)} onChange={e=>set({...v,d:Number(e.target.value)})}>{Array.from({length:DAYS_IN[v.m-1]},(_,i)=><option key={i} value={String(i+1)}>{String(i+1)}</option>)}</Select></span>
+  const lbl=x=>`${MONTHS[x.m-1]} ${x.d}`
+  async function save(){ setBusy(true); const ok=await ctx.saveSemPeriod({from:val(f),to:val(t)}); setBusy(false); if(ok){ setMsg('Saved'); setTimeout(()=>setMsg(''),1800) } }
+  async function clear(){ setBusy(true); await ctx.saveSemPeriod(null); setBusy(false) }
+  async function apply(){
+    if(!p){ notifyDialog('Save a period first.'); return }
+    if(!(await confirmDialog({title:'Apply to existing events & tasks?',body:`Everything dated ${lbl(parse(p.from))} → ${lbl(parse(p.to))} becomes 1st semester, the rest becomes 2nd semester. This re-tags all current events and tasks.`,confirmLabel:'Apply'}))) return
+    setBusy(true); const {data,error}=await supabase.rpc('apply_sem_period'); setBusy(false)
+    if(error) notifyDialog(error.message.includes('apply_sem_period')?'Run supabase/sem-period.sql in the Supabase SQL editor first.':error.message); else notifyDialog(`Done — ${data?.events??0} events and ${data?.tasks??0} tasks updated.`)
+  }
+  return <>
+    <div className="panel-title" style={{marginTop:26}}><h2>1st semester period</h2></div>
+    <p className="cc-note">Set when the 1st semester runs (month and day). New and edited events and tasks inside this range are tagged 1st semester automatically; everything else is 2nd semester. It repeats every year.</p>
+    <div className="cc-row sp-row"><div><strong>From</strong><span>First day of the 1st semester</span></div><Pick v={f} set={setF}/></div>
+    <div className="cc-row sp-row"><div><strong>To</strong><span>Last day of the 1st semester</span></div><Pick v={t} set={setT}/></div>
+    <div className="sp-actions">
+      <button type="button" className="primary-btn" disabled={busy} onClick={save}>{msg||'Save period'}</button>
+      <button type="button" className="secondary-btn" disabled={busy||!p} onClick={apply}>Apply to existing</button>
+      {p && <button type="button" className="secondary-btn" disabled={busy} onClick={clear}>Clear</button>}
+    </div>
+    <p className="cc-note" style={{marginTop:8}}>{p?`Current: ${lbl(parse(p.from))} → ${lbl(parse(p.to))}`:'No period set — new items default to 2nd semester.'}</p>
+  </>
+}
+// Admin-only: every Google Sheet backup link lives here. Everyone else just gets the "Check Google Sheet" button.
+function SheetLinks(){
+  const scopes=[['ALL','Main spreadsheet','Shown to Admin, EIC, AEIC, EDBO and Art Director'],['Media','Media department','Shown to Head Media and Media staff'],['Colorist','Colorist department','Shown to TD and Colorist staff']]
+  const [vals,setVals]=useState({}); const [saved,setSaved]=useState({}); const [busy,setBusy]=useState('')
+  useEffect(()=>{ supabase.from('integrations').select('scope,sheet_webhook_url').then(({data})=>setVals(Object.fromEntries((data||[]).map(r=>[r.scope,r.sheet_webhook_url||''])))) },[])
+  async function save(scope){
+    setBusy(scope)
+    const {error}=await supabase.from('integrations').upsert({scope,sheet_webhook_url:(vals[scope]||'').trim(),updated_at:new Date().toISOString()},{onConflict:'scope'})
+    setBusy(''); if(error){ notifyDialog(error.message); return }
+    setSaved(o=>({...o,[scope]:true})); setTimeout(()=>setSaved(o=>({...o,[scope]:false})),1800)
+  }
+  return <>
+    <div className="panel-title" style={{marginTop:26}}><h2>Google Sheet links</h2></div>
+    <p className="cc-note">Paste each backup sheet’s share link here. Everyone else only sees a “Check Google Sheet” button on their Backup page.</p>
+    {scopes.map(([k,label,sub])=><div className="cc-row cc-link" key={k}><div><strong>{label}</strong><span>{sub}</span></div>
+      <div className="cc-link-in"><input className="filter-select" placeholder="https://docs.google.com/spreadsheets/…" value={vals[k]||''} onChange={e=>setVals(o=>({...o,[k]:e.target.value}))}/><button type="button" className="secondary-btn" disabled={busy===k} onClick={()=>save(k)}>{saved[k]?'Saved ✓':'Save'}</button></div></div>)}
+  </>
+}
+function Modal({title,onClose,children}){
+  const [closing,setClosing]=useState(false); const box=useRef(null); const back=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
+  const [tb]=useState(()=>Math.max(0,Math.round(document.querySelector('.topbar')?.getBoundingClientRect().bottom||0)))
+  useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; document.documentElement.classList.add('modal-open'); return ()=>{ document.body.style.overflow=prev; document.documentElement.classList.remove('modal-open') } },[])
+  const phone=()=>window.innerWidth<=760
+  function slideOut(){ const el=box.current; if(!el) return; el.style.animation='none'; el.style.transition='transform .5s cubic-bezier(.22,1,.36,1)'; void el.offsetWidth; el.style.transform='translateY(110%)' }
+  // X / tap outside: on phones the sheet slides down exactly like pulling it down; on desktop it fades.
+  function close(){ if(done.current) return; done.current=true; if(phone()){ slideOut(); setClosing('drag'); setTimeout(onClose,480) } else { setClosing(true); setTimeout(onClose,420) } }
+  useEffect(()=>{
+    const el=box.current, bk=back.current; if(!el||!bk) return
+    const start=e=>{ if(!phone()||done.current) return; if(el.scrollTop>0 && !e.target.closest('.modal-head')) return; drag.current={y:e.touches[0].clientY,on:true,dy:0}; el.style.animation='none'; el.style.transition='none' }
+    const move=e=>{ const d=drag.current; if(!d.on) return; const dy=e.touches[0].clientY-d.y; if(dy<=0){ d.dy=0; el.style.transform=''; return } d.dy=dy; el.style.transform=`translateY(${dy*.92}px)`; if(e.cancelable) e.preventDefault() }
+    const end=()=>{ const d=drag.current; if(!d.on) return; d.on=false
+      if(d.dy>110){ done.current=true; slideOut(); setClosing('drag'); setTimeout(onClose,480) }
+      else { el.style.transition='transform .55s cubic-bezier(.22,1,.36,1)'; el.style.transform='' } }
+    const stopBg=e=>{ if(e.target===bk && e.cancelable) e.preventDefault() }   // the page behind must never scroll
+    el.addEventListener('touchstart',start,{passive:true}); el.addEventListener('touchmove',move,{passive:false}); el.addEventListener('touchend',end); el.addEventListener('touchcancel',end)
+    bk.addEventListener('touchmove',stopBg,{passive:false})
+    return ()=>{ el.removeEventListener('touchstart',start); el.removeEventListener('touchmove',move); el.removeEventListener('touchend',end); el.removeEventListener('touchcancel',end); bk.removeEventListener('touchmove',stopBg) }
+  },[])  // eslint-disable-line
+  // Rendered on <body> so the page's animations can never trap or shrink the overlay.
+  return createPortal(<div ref={back} style={{'--tb':tb+'px'}} className={`modal-backdrop ${closing?'closing':''}`} onClick={e=>{ if(e.target===e.currentTarget) close() }}>
+    <div className={`modal ${closing===true?'closing':''}`} ref={box}><div className="modal-head"><h2>{title}</h2><button type="button" className="icon-btn" onClick={close}><X size={18}/></button></div>{children}</div>
+  </div>,document.body)
+}
+
+// Token-style person picker. multi=true toggles membership on click; multi=false makes each click replace the selection.
+function PersonPicker({groups,value,multi,onChange,emptyLabel='No one available yet.'}){
+  const flat=groups.flatMap(g=>g.people)
+  if(!flat.length) return <div className="empty" style={{padding:'14px 0'}}>{emptyLabel}</div>
+  function toggle(id){
+    if(multi){ onChange(value.includes(id)?value.filter(x=>x!==id):[...value,id]) }
+    else { onChange(value[0]===id?[]:[id]) }
+  }
+  return <div className="token-picker">
+    {groups.map(g=>g.people.length>0 && <div key={g.label} className="token-group">
+      {g.label && <div className="token-group-label">{g.label}</div>}
+      <div className="token-row">{g.people.map(p=><button type="button" key={p.id} className={`token ${value.includes(p.id)?'active':''}`} onClick={()=>toggle(p.id)}>{p.full_name}</button>)}</div>
+    </div>)}
+  </div>
+}
+
+/* ---------------- Dashboards ---------------- */
+const DetailCtx=createContext({openEvent:()=>{},openTask:()=>{}})
+function DutyGrab({sched,profile,onChanged}){
+  const rows=DUTIES.filter(([d])=>(slotsOf(sched)[d]||0)>0)
+  if(!rows.length) return null
+  const mine=(sched.schedule_members||[]).find(m=>m.member_id===profile.id); const myDuties=mine?.duties||[]
+  const over=new Date(sched.end_at)<new Date()
+  const canRemove=profile.role==='head_media'||profile.role==='edbo'||isAdminLike(profile.role)   // staff can't give a duty back
+  const claim=d=>supabase.rpc('grab_duty',{p_schedule:sched.id,p_duty:d})
+  async function remove(d,m){
+    if(!await confirmDialog({title:'Remove from duty?',body:`${m.profiles?.full_name||'This person'} will be taken off ${d} for this event.`,danger:true,confirmLabel:'Remove'})) return
+    const {error}=await supabase.rpc('release_duty',{p_schedule:sched.id,p_duty:d,p_member:m.member_id}); if(error) notifyDialog(error.message); onChanged&&onChanged()
+  }
+  return <div className="duty-grab" onClick={e=>e.stopPropagation()}>
+    <div className="eyebrow">OPEN DUTIES</div>
+    <div className="duty-slots">{rows.map(([d,t])=>{ const cap=slotsOf(sched)[d]; const holders=(sched.schedule_members||[]).filter(m=>(m.duties||[]).includes(d)); const taken=holders.length; const left=cap-taken; const has=myDuties.includes(d)
+      return <div key={d} className={`duty-slot ${left<=0?'full':''} ${has?'mine':''}`}>
+        <div className="ds-top">
+          <div className="ds-name"><b>{d}</b><small>{t}</small></div>
+          <span className="slot-count">{taken}/{cap}</span>
+          {canGrab(profile.role) && !over && !has && left>0 && <ActionButton label="Claim" run={()=>claim(d)} after={onChanged}/>}
+        </div>
+        {holders.length>0 && <div className="ds-holders">{holders.map(m=><span key={m.member_id} className={`holder ${m.member_id===profile.id?'me':''}`}>{m.profiles?.full_name||'Member'}{m.member_id===profile.id?' (you)':''}{canRemove && <button type="button" className="holder-x" aria-label="Remove" onClick={()=>remove(d,m)}>×</button>}</span>)}</div>}
+      </div> })}</div>
+  </div>
+}
+function OpenDutiesPanel({profile}){
+  const [items,setItems]=useState([]); const dt=useContext(DetailCtx)
+  async function load(){
+    const {data,error}=await supabase.from('schedules').select('id,title,start_at,end_at,location,slots,department,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').gt('end_at',new Date().toISOString()).order('start_at')
+    if(error){ setItems([]); return }
+    setItems((data||[]).filter(s=>hasSlots(s) && (hasOpenDuty(s) || (s.schedule_members||[]).some(m=>m.member_id===profile.id && (m.duties||[]).length))))
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  if(!canGrab(profile.role)||!items.length) return null
+  return <div className="panel task-panel" style={{marginBottom:14}}>
+    <div className="panel-title"><h2>Open duties</h2></div>
+    <p className="panel-sub">Claim a duty you want to cover. Spots are first come, first served — once claimed, only the Head Media or EDBO can change it.</p>
+    <div className="duty-events">{items.map(s=><div className="duty-event" key={s.id}>
+      <button type="button" className="duty-event-head" onClick={()=>dt.openEvent(s.id)}><strong>{s.title}</strong><span>{fmtDay(s.start_at,false)} • {fmtTime(s.start_at)}–{fmtTime(s.end_at)} • {s.location||'No location'}</span></button>
+      <DutyGrab sched={s} profile={profile} onChanged={load}/>
+    </div>)}</div>
+  </div>
+}
+function EventDetailModal({id,profile,onClose}){
+  const [s,setS]=useState(undefined)
+  async function load(){ const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,duties,profiles(full_name,avatar_url))').eq('id',id).maybeSingle(); setS(data||null) }
+  useEffect(()=>{ load() },[id]); usePoll(load,15000)
+  const hrs=s?Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000):0
+  return <Modal title={s?.title||'Event'} onClose={onClose}>
+    {s===undefined && <div className="empty">Loading…</div>}
+    {s===null && <div className="empty">This event is no longer available.</div>}
+    {s && <div className="detail-body">
+      <div className="detail-grid">
+        <div><small>Date</small><b>{new Date(s.start_at).toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'})}</b></div>
+        <div><small>Time</small><b>{fmtTime(s.start_at)} – {fmtTime(s.end_at)} ({hrs.toFixed(1)}h)</b></div>
+        <div><small>Where</small><b>{s.location||'No location set'}</b></div>
+        <div><small>Status</small><b>{s.status==='completed'?`Sorted${s.sorted_at?` (${fmtDay(s.sorted_at,false)})`:''}`:s.status}</b></div>
+      </div>
+      {s.description && <p className="detail-desc">{s.description}</p>}
+      {s.legacy_media && <p className="detail-desc">Media: {s.legacy_media}</p>}
+      {s.legacy_colorist && <p className="detail-desc">Colorist: {s.legacy_colorist}</p>}
+      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>MEDIAS</div>
+        <div className="crew-list">{s.schedule_members.map(m=><div className={`crew-person ${m.member_id===profile.id?'me':''}`} key={m.member_id}><Avatar cls="avatar sm" url={m.profiles?.avatar_url} name={m.profiles?.full_name||'?'}/><span>{m.profiles?.full_name}{m.member_id===profile.id?' (you)':''}</span>{(m.duties||[]).length>0 && <em className="duty-tag">{m.duties.join('/')}</em>}{needsSort(m) && s.status!=='completed' && <small className={m.sorted?'ok':''}>{m.sorted?'sorted ✓':'pending'}</small>}</div>)}</div></>}
+      <DutyGrab sched={s} profile={profile} onChanged={load}/>
+    </div>}
+  </Modal>
+}
+function TaskDetailModal({id,onClose}){
+  const [t,setT]=useState(undefined)
+  useEffect(()=>{ (async()=>{ const {data}=await supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name,avatar_url)').eq('id',id).maybeSingle(); setT(data||null) })() },[id])
+  return <Modal title={t?.title||'Task'} onClose={onClose}>
+    {t===undefined && <div className="empty">Loading…</div>}
+    {t===null && <div className="empty">This task is no longer available.</div>}
+    {t && <div className="detail-body">
+      <div className="detail-grid">
+        <div><small>Department</small><b>{t.department}</b></div>
+        <div><small>Status</small><b>{String(t.status).replace('_',' ')}</b></div>
+        <div><small>Assigned to</small><b className="with-av"><Avatar cls="avatar sm" url={t.profiles?.avatar_url} name={t.profiles?.full_name||'?'}/>{t.profiles?.full_name||'Unassigned'}</b></div>
+        <div><small>Assigned</small><b>{fmtDay(t.assigned_date)}</b></div>
+        {t.completed_at && <div><small>Done</small><b>{fmtDay(t.completed_at)}</b></div>}
+      </div>
+      {t.description && <p className="detail-desc">{t.description}</p>}
+    </div>}
+  </Modal>
+}
+function WelcomeHero({profile,children,onCreate,createLabel,aside}){
+  return <section className="hero">
+    <div><div className="eyebrow"><Sparkles size={14}/> {seesAll(profile.role)?'COMMAND CENTER':(roleDept(profile.role)||'').toUpperCase()+' DESK'}</div>
+    <h1><span className="greet-sub">{greet()},</span> <span className="greet-name">{profile.full_name.split(' ')[0]}.</span></h1><p>{WELCOME_LINE}</p></div>
+    {(aside||onCreate) && <div className="hero-actions">{aside}{onCreate && <button className="primary-btn" onClick={onCreate}><Plus size={17}/> {createLabel}</button>}</div>}
+  </section>
+}
+
+// Search + date (+ extras) bar used by trackers, members and backup.
+// Dropdown drawn in the app's own style (replaces the browser's grey menu). Works like <select>: pass <option>s as children.
+function Select({value,onChange,children,className='',disabled,style}){
+  const [open,setOpen]=useState(false); const [pos,setPos]=useState(null); const btn=useRef(null)
+  const opts=[]; Children.forEach(children,c=>{ if(c&&c.props){ const label=Array.isArray(c.props.children)?c.props.children.join(''):String(c.props.children??''); opts.push({value:c.props.value!==undefined?c.props.value:label,label}) } })
+  const cur=opts.find(o=>o.value===value)||opts[0]
+  function toggle(){ if(disabled) return; if(!open){ const r=btn.current.getBoundingClientRect(); const below=window.innerHeight-r.bottom-12; const up=below<190&&r.top>below; setPos({left:r.left,width:r.width,...(up?{bottom:window.innerHeight-r.top+6,maxHeight:Math.min(280,r.top-12)}:{top:r.bottom+6,maxHeight:Math.min(280,below)})}) } setOpen(!open) }
+  useEffect(()=>{ if(!open) return; const close=e=>{ if(e.type==='keydown'){ if(e.key==='Escape') setOpen(false); return } if(!e.target.closest?.('.sel-list')&&!btn.current?.contains(e.target)) setOpen(false) }; const off=e=>{ if(e&&e.type==='scroll'&&e.target&&e.target.closest&&e.target.closest('.sel-list')) return; setOpen(false) }
+    document.addEventListener('mousedown',close); document.addEventListener('keydown',close); window.addEventListener('resize',off); window.addEventListener('scroll',off,true)
+    return ()=>{ document.removeEventListener('mousedown',close); document.removeEventListener('keydown',close); window.removeEventListener('resize',off); window.removeEventListener('scroll',off,true) } },[open])
+  return <div className={`sel ${className.replace('filter-select','').trim()} ${open?'open':''}`} style={style}>
+    <button type="button" ref={btn} className="sel-btn" disabled={disabled} onClick={toggle} aria-haspopup="listbox" aria-expanded={open}><span>{cur?.label}</span><ChevronDown size={15} className="sel-chev"/></button>
+    {open && pos && createPortal(<div className="sel-list" role="listbox" style={pos}>{opts.map(o=><button type="button" role="option" aria-selected={o.value===value} key={String(o.value)} className={o.value===value?'on':''} onClick={()=>{ onChange({target:{value:o.value}}); setOpen(false) }}><span>{o.label}</span>{o.value===value && <Check size={13}/>}</button>)}</div>,document.body)}
+  </div>
+}
+function FilterBar({search,onSearch,date,onDate,children,onClear,extraActive,placeholder='Search…'}){
+  const active=search||date||extraActive
+  return <div className="panel filter-bar">
+    <label className="grow">Search<div className="search-box"><Search size={15}/><input value={search} onChange={e=>onSearch(e.target.value)} placeholder={placeholder}/></div></label>
+    {onDate && <label>Date<DateField className="filter-date" value={date} onChange={onDate}/></label>}
+    {children}
+    <button type="button" className={`text-btn filter-clear ${active?'':'off'}`} disabled={!active} tabIndex={active?0:-1} onClick={()=>{ onSearch(''); onDate&&onDate(''); onClear&&onClear() }}>Clear</button>
+  </div>
+}
+
+// Events I'm on that still need MY part marked sorted. Everyone assigned to an event (media, EIC, TD, Art Director…) uses this.
+function ToSortPanel({profile}){
+  const [items,setItems]=useState([]); const dt=useContext(DetailCtx)
+  async function load(){
+    const {data}=await supabase.from('schedules').select('id,title,start_at,end_at,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').order('start_at')
+    const now=new Date()
+    setItems((data||[]).filter(s=>{ const my=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return my && needsSort(my) && !my.sorted && new Date(s.end_at)<=now }))
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  const mark=id=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',id).eq('member_id',profile.id)
+  if(!items.length) return null
+  return <div className="panel task-panel" style={{marginBottom:14}}>
+    <div className="panel-title"><h2>To sort</h2></div>
+    <div className="task-list">{items.map(s=><div className="task-row clickable" onClick={()=>dt.openEvent(s.id)} key={s.id}><div className="task-icon media"><CalendarDays size={16}/></div>
+      <div className="task-info"><strong>{s.title}</strong><span>{fmtDay(s.start_at)}{sortProgress(s)}{crewLine(s,profile.id)}</span></div>
+      <ActionButton label="Sorted" run={()=>mark(s.id)} after={load}/></div>)}</div>
+  </div>
+}
+// Upcoming events I am on. EDBO (EIC, AEIC, TD, Art Director…) only see this when they actually have an event duty.
+function MyEventsPanel({profile}){
+  const [items,setItems]=useState([]); const dt=useContext(DetailCtx)
+  async function load(){
+    const {data}=await supabase.from('schedules').select('id,title,start_at,end_at,location,status,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department','Media').neq('status','completed').neq('status','done').order('start_at')
+    const startOfToday=new Date(); startOfToday.setHours(0,0,0,0)
+    setItems((data||[]).filter(s=>new Date(s.end_at)>=startOfToday && (s.schedule_members||[]).some(m=>m.member_id===profile.id)).slice(0,6))
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  if(!items.length) return null
+  return <div className="panel task-panel" style={{marginBottom:14}}>
+    <div className="panel-title"><h2>My events</h2></div>
+    <div className="task-list">{items.map(s=>{ const me=(s.schedule_members||[]).find(m=>m.member_id===profile.id); return <div className="task-row clickable" onClick={()=>dt.openEvent(s.id)} key={s.id}><div className="task-icon media"><CalendarDays size={16}/></div>
+      <div className="task-info"><strong>{s.title}{(me?.duties||[]).length>0 && <em className="duty-tag">{me.duties.join('/')}</em>}</strong><span>{fmtDay(s.start_at,false)} • {fmtTime(s.start_at)}–{fmtTime(s.end_at)} • {s.location||'No location'}{crewLine(s,profile.id)}</span></div></div> })}</div>
+  </div>
+}
+function crewLine(s,myId){ const o=(s.schedule_members||[]).filter(m=>m.member_id!==myId).map(m=>crewText(m)).filter(Boolean); return o.length?` • With ${o.join(', ')}`:'' }
+
+// Tasks assigned to me (shown on Admin / EDBO dashboards, since they sometimes colorgrade or do cover work too).
+function MyTasksPanel({profile}){
+  const [rows,setRows]=useState([]); const dt=useContext(DetailCtx)
+  async function load(){ const {data}=await supabase.from('tasks').select('*').eq('assigned_to',profile.id).neq('status','completed').order('created_at',{ascending:false}); setRows(data||[]) }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  const done=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
+  if(!rows.length) return null
+  return <div className="panel task-panel" style={{marginBottom:14}}>
+    <div className="panel-title"><h2>My tasks</h2></div>
+    <div className="task-list">{rows.map(t=><div className="task-row clickable" onClick={()=>dt.openTask(t.id)} key={t.id}><div className="task-icon layout"><CheckSquare size={16}/></div>
+      <div className="task-info"><strong>{t.title}</strong><span>{t.department} • Assigned {fmtDay(t.assigned_date)}</span></div>
+      <ActionButton label={t.department==='Colorist'?'Colorgraded':'Done'} run={()=>done(t.id)} after={load}/></div>)}</div>
+  </div>
+}
+
+const CARD_GROUPS=['Media','Colorist']
+const DETAIL_GROUPS=[['all','All'],['edbo','EDBO'],['head','Heads'],['staff','Staff']]
+function DeptDetail({dept,raw,people,sem}){
+  const [g,setG]=useState('all'); const [open,setOpen]=useState({})
+  const byId=useMemo(()=>Object.fromEntries(people.map(p=>[p.id,p])),[people])
+  const inGrp=id=>g==='all'||(byId[id]&&semGroup(byId[id].role)===g)
+  const media=dept==='Media'; const now=new Date()
+  const evRows=raw.schedules.filter(s=>inSem(s,sem)&&(g==='all'||(s.schedule_members||[]).some(m=>inGrp(m.member_id))))
+  const tkRows=raw.tasks.filter(t=>t.department===dept&&inSem(t,sem)&&(g==='all'||inGrp(t.assigned_to)))
+  const stats=media?{ a:evRows.filter(s=>new Date(s.start_at)>=now).length, b:evRows.filter(s=>now>=new Date(s.start_at)&&now<=new Date(s.end_at)).length, c:evRows.filter(s=>s.status==='completed'||s.status==='done').length, d:evRows.reduce((x,s)=>x+evHours(s),0).toFixed(1) }
+    :{ a:tkRows.filter(t=>t.status==='not_started').length, b:tkRows.filter(t=>t.status==='in_progress').length, c:tkRows.filter(t=>t.status==='completed').length, d:tkRows.length }
+  const ids=new Set(media?evRows.flatMap(s=>(s.schedule_members||[]).map(m=>m.member_id)):tkRows.map(t=>t.assigned_to).filter(Boolean))
+  const list=people.filter(p=>ids.has(p.id)&&inGrp(p.id)).sort(dirSort).map(p=>({p, items:media?evRows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===p.id)).sort((x,y)=>new Date(y.start_at)-new Date(x.start_at)):tkRows.filter(t=>t.assigned_to===p.id), total:media?evRows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===p.id)).reduce((x,s)=>x+evHours(s),0):0}))
+  const allOpen=list.length>0&&list.every(x=>open[x.p.id])
+  const groupCount=k=>people.filter(p=>k==='all'||semGroup(p.role)===k).length
+  return <div className="detail">
+    <Seg className="chips" value={g} onChange={setG} options={DETAIL_GROUPS.map(([k,l])=>[k,l,groupCount(k)])}/>
+    <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+      {media ? <>
+        <Stat title="Upcoming" value={stats.a} note="Events ahead" icon={CalendarDays}/>
+        <Stat title="Ongoing" value={stats.b} note="Happening now" icon={Clock3}/>
+        <Stat title="Sorted" value={stats.c} note="Wrapped" icon={CheckCircle2}/>
+        <Stat title="Total Hours" value={stats.d} note="Logged" icon={Clock3}/>
+      </> : <>
+        <Stat title="Not Started" value={stats.a} note="Queued" icon={CalendarDays}/>
+        <Stat title="Ongoing" value={stats.b} note="In progress" icon={Clock3}/>
+        <Stat title="Done" value={stats.c} note="Finished" icon={CheckCircle2}/>
+        <Stat title="Total Tasks" value={stats.d} note="All time" icon={ClipboardCheck}/>
+      </>}
+    </div>
+    <div className="acc-head"><h3>People <span>{list.length}</span></h3>{list.length>0 && <button type="button" onClick={()=>setOpen(allOpen?{}:Object.fromEntries(list.map(x=>[x.p.id,true])))}>{allOpen?'Collapse all':'Expand all'}</button>}</div>
+    {!list.length && <div className="empty" style={{padding:'14px 0'}}>Nobody in this group yet.</div>}
+    {list.map(({p,items,total})=><div className={`acc ${open[p.id]?'open':''}`} key={p.id}>
+      <button type="button" className="acc-row" onClick={()=>setOpen(o=>({...o,[p.id]:!o[p.id]}))}>
+        <Avatar cls="acc-av" url={p.avatar_url} name={p.full_name}/>
+        <span className="acc-name"><b>{p.full_name}</b><small>{roleLabel(p)}</small></span>
+        <span className="acc-fig">{media?<><CountUp value={total.toFixed(1)} dur={800}/> hrs</>:<><CountUp value={items.length} dur={800}/> tasks</>}</span>
+        <ChevronDown size={16} className="acc-chev"/>
+      </button>
+      <div className="acc-body"><div><ul>{items.map((x,i)=>media
+        ? <li key={i}><span>{x.title}</span><small>{fmtDay(x.start_at,false)} · {evHours(x).toFixed(1)}h</small></li>
+        : <li key={i}><span>{x.title}</span><small>{String(x.status).replace('_',' ')}</small></li>)}</ul></div></div>
+    </div>)}
+  </div>
+}
+function AdminDashboard({profile}){
+  const [raw,setRaw]=useState({tasks:[],schedules:[]})
+  const [counts,setCounts]=useState({}); const [people,setPeople]=useState([])
+  const [detail,setDetail]=useState(null); const [sem,setSem]=useSem(profile.role)
+  useEffect(()=>{ load() },[]); usePoll(load)
+  async function load(){
+    // Member counts show staff only — heads and the EDBO board are not counted here.
+    const profiles=await fetchActive()
+    setCounts({ Media:(profiles||[]).filter(p=>p.role==='staff_media').length, Colorist:(profiles||[]).filter(p=>p.role==='staff_colorist').length })
+    setPeople(profiles||[])
+    const {data:tasks}=await supabase.from('tasks').select('title,department,status,semester,assigned_to')
+    const {data:schedules}=await supabase.from('schedules').select('id,title,department,start_at,end_at,status,semester,schedule_members(member_id)')
+    setRaw({tasks:tasks||[],schedules:(schedules||[]).filter(s=>s.department==='Media')})
+  }
+  const hrsFor=k=>raw.schedules.filter(s=>inSem(s,k)).reduce((a,s)=>a+evHours(s),0)
+  const metrics={ Media:{value:hrsFor(sem).toFixed(1),label:'hrs logged'}, Colorist:{value:raw.tasks.filter(t=>inSem(t,sem)&&t.department==='Colorist'&&t.status==='completed').length,label:'tasks done'} }
+  function openDetail(d){ setDetail(d) }
+  return <div>
+    <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={hrsFor('1')} h2={hrsFor('2')}/>
+    <div className="dept-grid two">{CARD_GROUPS.map(d=>{ const Icon=DEPT_ICON[d]; return <div key={d} className="panel dept-card" onClick={()=>openDetail(d)}>
+      <div className="dept-icon"><Icon size={20}/></div><h3>{d}</h3><p><CountUp value={counts[d]||0}/> members</p>
+      <div className="dept-metric"><CountUp value={metrics[d]?.value ?? '—'}/><small>{metrics[d]?.label}</small></div>
+    </div> })}</div>
+    {detail && <Modal title={detail} onClose={()=>setDetail(null)}><DeptDetail dept={detail} raw={raw} people={people} sem={sem}/></Modal>}
+    {!isViewer(profile.role) && <ToSortPanel profile={profile}/>}
+    {!isViewer(profile.role) && <MyEventsPanel profile={profile}/>}
+    {!isViewer(profile.role) && <MyTasksPanel profile={profile}/>}
+    {hasPostingTracker(profile.role) && <PostingTracker profile={profile} sem={sem}/>}
+  </div>
+}
+
+/* ---------------- Posting Tracker: status of every Media event, from shoot to Facebook post (Admin / EIC / AEIC / TD / Art Director) ---------------- */
+function PostingTracker({profile,sem:semIn}){
+  const dt=useContext(DetailCtx)
+  const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
+  const canPost=isAdminLike(profile.role)||profile.role==='art_director'
+  const [semOwn,setSem]=useSem(profile.role); const sem=semIn??semOwn
+  async function load(){
+    const {data:events}=await supabase.from('schedules').select('id,title,start_at,status,posted_at,sorted_at,semester,schedule_members(sorted,duties)').eq('department','Media').order('start_at',{ascending:false}).limit(300)
+    const {data:tasks}=await supabase.from('tasks').select('schedule_id,department,status').not('schedule_id','is',null)
+    const statusFor=(eventId,dept)=>{
+      const ts=(tasks||[]).filter(x=>x.schedule_id===eventId && x.department===dept)
+      if(!ts.length) return 'not started'
+      if(ts.every(t=>t.status==='completed')) return 'completed'
+      return 'in progress'
+    }
+    setRows((events||[]).filter(e=>inSem(e,sem)).map(e=>{
+      const mem=(e.schedule_members||[]).filter(needsSort); const done=mem.filter(m=>m.sorted).length
+      const isSorted=e.status==='completed'||e.status==='done'
+      return { id:e.id, date:new Date(e.start_at), title:e.title,
+        supposedPost:new Date(new Date(e.start_at).getTime()+6*864e5),
+        sorted:isSorted?'sorted':(mem.length&&done>0?`${done}/${mem.length} sorted`:'not sorted'), isSorted, partial:!isSorted&&done>0,
+        colorgrade:statusFor(e.id,'Colorist'), cover:statusFor(e.id,'Art Director'),
+        posted:!!e.posted_at, postedOn:e.posted_at?new Date(e.posted_at):null, archive:(e.semester??2)===1 }
+    }))
+    setLoading(false)
+  }
+  useEffect(()=>{ load() },[sem]); usePoll(load)
+  const markPosted=id=>supabase.rpc('mark_event_posted',{sid:id})
+  const cls=v=>v==='completed'?'completed':v==='in progress'?'in_progress':'scheduled'
+  return <div className="panel table-panel" style={{marginTop:14}}>
+    <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Posting Tracker</h2>{semIn===undefined && <div className="mini-filter"><Select value={sem} onChange={e=>setSem(e.target.value)}>{SEM_OPTIONS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></div>}</div>
+    <div>
+      <div className="table-head posting-row"><span>Event Date</span><span>Event Name</span><span>Post By</span><span>Sorted</span><span>Colorgrade</span><span>FB Cover</span><span>Posted</span><span>Posted On</span></div>
+      {loading ? null : rows.map(r=><div className="table-row posting-row clickable" onClick={()=>dt.openEvent(r.id)} key={r.id}>
+        <span data-label="Event date">{fmtDay(r.date)}</span><strong className="row-title">{r.title}</strong><span data-label="Post by">{fmtDay(r.supposedPost)}</span>
+        <span data-label="Sorted"><span className={`status ${r.isSorted?'completed':r.partial?'in_progress':'scheduled'}`}>{r.sorted}</span></span>
+        <span data-label="Colorgrade"><span className={`status ${cls(r.colorgrade)}`}>{r.colorgrade}</span></span>
+        <span data-label="FB cover">{r.archive?'—':<span className={`status ${cls(r.cover)}`}>{r.cover}</span>}</span>
+        <span data-label="Posted">{r.archive ? '—' : r.posted ? <span className="status completed">posted</span> : (canPost && (r.cover==='completed'||isAdminLike(profile.role)) ? <ActionButton label="Mark posted" doneLabel="Posted" run={()=>markPosted(r.id)} after={load}/> : <span className="status scheduled">not posted</span>)}</span>
+        <span data-label="Posted on">{r.postedOn?fmtDay(r.postedOn):'—'}</span>
+      </div>)}
+      {!loading && !rows.length && <div className="empty">No media events yet.</div>}
+    </div>
+  </div>
+}
+
+function sortProgress(s){ const m=(s.schedule_members||[]).filter(needsSort); if(!m.length) return ''; return ` • ${m.filter(x=>x.sorted).length}/${m.length} sorted` }
+
+function HoursDashboard({profile}){
+  const dt=useContext(DetailCtx)
+  const staff=isStaff(profile.role)
+  const [members,setMembers]=useState(0); const [allRows,setAllRows]=useState([]); const [sem,setSem]=useSem(profile.role)
+  const [items,setItems]=useState([])
+  async function load(){
+    const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,duties,profiles(full_name))').eq('department',profile.department).order('start_at',{ascending:true})
+    let rows=data||[]
+    if(staff) rows=rows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===profile.id))
+    const now=new Date()
+    const upcoming=rows.filter(s=>new Date(s.start_at)>=now && (s.semester??2)===2)
+    if(!staff){ setMembers((await fetchActive()).filter(p=>p.role==='staff_media').length) }
+    setAllRows(rows)
+    setItems(upcoming.slice(0,6))
+  }
+  const semRows=allRows.filter(s=>inSem(s,sem)); const nowT=new Date()
+  const hrsSem=k=>allRows.filter(s=>inSem(s,k)).reduce((a,s)=>a+evHours(s),0)
+  const stats={ upcoming:semRows.filter(s=>new Date(s.start_at)>=nowT).length, completed:semRows.filter(s=>s.status==='completed'||s.status==='done').length, total:semRows.length, hours:hrsSem(sem), members }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  const next=items[0]
+  return <div>
+    <WelcomeHero profile={profile} aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={hrsSem('1')} h2={hrsSem('2')} label={staff?'My total hours':'Team total hours'}/>
+    <section className="stats-grid">
+      {staff ? <>
+        <Stat title="Upcoming Events" value={stats.upcoming} note="Coming up" icon={CalendarDays}/>
+        <Stat title="Assigned Events" value={stats.total} note="All time" icon={ClipboardCheck}/>
+        <Stat title="Total Hours" value={stats.hours.toFixed(1)} note="Logged this edition" icon={Clock3}/>
+      </> : <>
+        <Stat title="Coming Events" value={stats.upcoming} note="Scheduled ahead" icon={CalendarDays}/>
+        <Stat title="Sorted Events" value={stats.completed} note="Wrapped" icon={CheckCircle2}/>
+        <Stat title="Total Events" value={stats.total} note="This edition" icon={ClipboardCheck}/>
+        <Stat title="Assigned Hours" value={stats.hours.toFixed(1)} note="Team total" icon={Clock3}/>
+        <Stat title="Media Staff" value={stats.members} note="In department" icon={Users}/>
+      </>}
+    </section>
+    <OpenDutiesPanel profile={profile}/>
+    {next && <div className="panel task-panel clickable-panel" style={{marginBottom:14}} onClick={()=>dt.openEvent(next.id)}>
+      <div className="panel-title"><h2>Next up</h2><span className="tap-hint">Tap for details</span></div>
+      <strong style={{fontSize:16,display:'block',marginBottom:6}}>{next.title}</strong>
+      <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>{new Date(next.start_at).toLocaleDateString([], {weekday:'long',month:'long',day:'numeric'})} • {fmtTime(next.start_at)}–{fmtTime(next.end_at)} ({Math.max(0,(new Date(next.end_at)-new Date(next.start_at))/3600000).toFixed(1)}h)</p>
+      <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>Where: {next.location||'No location set'}</p>
+      {next.description && <p style={{margin:'0 0 8px',color:'var(--text-dim)',fontSize:12}}>{next.description}</p>}
+      <div className="eyebrow" style={{margin:'10px 0 6px'}}>MEDIAS</div>
+      <div className="member-chips" style={{justifyContent:'flex-start'}}>{(next.schedule_members||[]).map(m=><span key={m.member_id} className={m.member_id===profile.id?'me':''}>{crewText(m)}{m.sorted?' ✓':''}{m.member_id===profile.id?' (you)':''}</span>)}</div>
+    </div>}
+    <div className="panel task-panel">
+      <div className="panel-title"><h2>{staff?'My schedule & assigned events':'Upcoming events'}</h2></div>
+      <div className="task-list">{items.map(s=><div className="task-row clickable" onClick={()=>dt.openEvent(s.id)} key={s.id}><div className="task-icon media"><CalendarDays size={16}/></div>
+        <div className="task-info"><strong>{s.title}</strong><span>{fmtDay(s.start_at,false)} • {fmtTime(s.start_at)} • {s.location||'No location'}{sortProgress(s)}{staff?crewLine(s,profile.id):''}</span></div>
+        <span className={`status ${s.status}`}>{s.status==='completed'?'sorted':s.status}</span></div>)}
+        {!items.length && <div className="empty">Nothing scheduled yet.</div>}</div>
+    </div>
+    <ToSortPanel profile={profile}/>
+    {hasPostingTracker(profile.role) && <PostingTracker profile={profile} sem={sem}/>}
+  </div>
+}
+
+function TasksDashboard({profile}){
+  const dt=useContext(DetailCtx)
+  const role=profile.role; const worker=isWorker(role); const td=isTD(role)
+  const [stats,setStats]=useState({open:0,done:0,total:0,members:0})
+  const [allTasks,setAllTasks]=useState([]); const [sem,setSem]=useSem(profile.role)
+  const [avail,setAvail]=useState([])
+  const [teammates,setTeammates]=useState([])
+  const [picks,setPicks]=useState({})
+  const [openTask,setOpenTask]=useState(false)
+  async function load(){
+    let q=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name)').order('created_at',{ascending:false})
+    if(worker) q=q.eq('assigned_to',profile.id); else q=q.in('department',managedTaskDepts(role))
+    const {data}=await q; const list=data||[]
+    let members=0; if(!worker){ members=(await fetchActive()).filter(p=>p.role==='staff_colorist').length }
+    setAllTasks(list); setStats(st=>({...st,members}))
+    if(td){
+      const {data:done}=await supabase.from('schedules').select('id,title,start_at,end_at,sorted_at').eq('department','Media').eq('status','completed').order('start_at',{ascending:false})
+      const {data:ownTasks}=await supabase.from('tasks').select('schedule_id').eq('department','Colorist').not('schedule_id','is',null)
+      const assignedIds=new Set((ownTasks||[]).map(t=>t.schedule_id))
+      setAvail((done||[]).filter(e=>!assignedIds.has(e.id)))
+      const tm=(await fetchActive()).filter(m=>m.role==='staff_colorist'||BOARD_ASSIGNABLE.includes(m.role))
+      setTeammates(tm.filter(m=>m.id!==profile.id))
+    }
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  const markDone=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
+  function setPickList(scheduleId,ids){ setPicks(p=>({...p,[scheduleId]:new Set(ids)})) }
+  async function assignStage(scheduleId,eventTitle,ids){
+    if(!ids.length) return
+    const {error}=await supabase.from('tasks').insert(ids.map(uid=>({ title:`${TD_STAGE.titlePrefix} — ${eventTitle}`, department:TD_STAGE.dept, assigned_to:uid, schedule_id:scheduleId, created_by:profile.id, assigned_date:todayISO() })))
+    if(error) notifyDialog(error.message); else { setPicks(p=>({...p,[scheduleId]:new Set()})); load() }
+  }
+  const semT=allTasks.filter(t=>inSem(t,sem)); const undone=semT.filter(t=>t.status!=='completed'); const rows=semT.slice(0,8)
+  const cnt=k=>allTasks.filter(t=>inSem(t,k)).length
+  const tstats={ open:undone.length, done:semT.filter(t=>t.status==='completed').length, total:semT.length }
+  const list=worker?undone:rows
+  return <div>
+    <WelcomeHero profile={profile} onCreate={canCreateTask(role)?()=>setOpenTask(true):null} createLabel="New task" aside={<SemSwitch value={sem} onChange={setSem}/>}/>
+    <SemSummary h1={cnt('1')} h2={cnt('2')} unit="tasks" label={worker?'My total tasks':'Total tasks'}/>
+    <section className="stats-grid">
+      <Stat title={worker?'My Tasks':'Open Tasks'} value={tstats.open} note="Active work" icon={CheckSquare}/>
+      <Stat title="Completed" value={tstats.done} note={worker?'Worked task number':'Finished'} icon={CheckCircle2}/>
+      {!worker && <Stat title="Colorists" value={stats.members} note="Staff" icon={Users}/>}
+      <Stat title="Total Tasks" value={tstats.total} note="All time" icon={ClipboardCheck}/>
+    </section>
+    <OpenDutiesPanel profile={profile}/>
+    <ToSortPanel profile={profile}/>
+    <MyEventsPanel profile={profile}/>
+    {td && <div className="panel" style={{marginBottom:14}}>
+      <div className="panel-title" style={{padding:'21px 21px 0'}}><h2>Ready for {TD_STAGE.verb}</h2></div>
+      {!avail.length && <div className="empty" style={{padding:'0 21px 21px'}}>No sorted events waiting.</div>}
+      {avail.map(e=>{ const picked=[...(picks[e.id]||[])]; return <div style={{padding:'16px 21px',borderTop:'1px solid var(--border)'}} key={e.id}>
+        <div style={{marginBottom:10}}><strong style={{display:'block',fontSize:13}}>{e.title}</strong><span style={{fontSize:11,color:'var(--text-dim)'}}>{fmtDay(e.start_at)}{e.sorted_at?` • sorted ${fmtDay(e.sorted_at,false)}`:''}</span></div>
+        <div className="assign-row">
+          <button className="act-btn idle" onClick={()=>assignStage(e.id,e.title,[profile.id])}>Assign to myself</button>
+          <div style={{flex:1,display:'grid',gap:8}}>
+            {[['STAFF',teammates.filter(m=>m.role==='staff_colorist')],['EDBO',teammates.filter(m=>BOARD_ASSIGNABLE.includes(m.role)).sort(dirSort)]].map(([lab,list])=>list.length>0 && <div key={lab}><div className="token-group-label">{lab}</div><div className="token-row">{list.map(m=><button type="button" key={m.id} className={`token ${picked.includes(m.id)?'active':''}`} onClick={()=>setPickList(e.id, picked.includes(m.id)?picked.filter(x=>x!==m.id):[...picked,m.id])}>{m.full_name}</button>)}</div></div>)}
+            {!teammates.length && <span style={{fontSize:11,color:'var(--text-dim)'}}>No one else to assign yet.</span>}</div>
+          {picked.length>0 && <button className="act-btn idle" onClick={()=>assignStage(e.id,e.title,picked)}>Assign selected ({picked.length})</button>}
+        </div>
+      </div> })}
+    </div>}
+    <div className="panel task-panel">
+      <div className="panel-title"><h2>{worker?'My tasks':'Recent tasks'}</h2></div>
+      <div className="task-list">{list.map(t=>{ const mine=t.status!=='completed' && t.assigned_to===profile.id; return <div className="task-row clickable" onClick={()=>dt.openTask(t.id)} key={t.id}><div className="task-icon layout"><CheckSquare size={16}/></div>
+        <div className="task-info"><strong>{t.title}</strong><span>{worker?'':`${t.profiles?.full_name||'Unassigned'} • `}Assigned {fmtDay(t.assigned_date,false)}{t.status==='completed'&&t.completed_at?` • Done ${fmtDay(t.completed_at,false)}`:''}</span></div>
+        {mine ? <ActionButton label={t.department==='Colorist'?'Colorgraded':'Done'} run={()=>markDone(t.id)} after={load}/> : <span className={`status ${t.status}`}>{t.status.replace('_',' ')}</span>}</div> })}
+        {list.length===0 && <div className="empty">Nothing here yet.</div>}</div>
+    </div>
+    {hasPostingTracker(role) && <PostingTracker profile={profile} sem={sem}/>}
+    {openTask && <TaskModal profile={profile} onClose={()=>setOpenTask(false)} onSaved={load}/>}
+  </div>
+}
+
+/* ---------------- Task Tracker: finished work. Shows assigned date + done date (no due dates). ---------------- */
+function TaskTracker({profile}){
+  const role=profile.role; const privileged=seesAll(role); const worker=isWorker(role)
+  const canTask=isAdminLike(role)||isTD(role); const canEvent=isAdminLike(role)
+  const [tasks,setTasks]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true)
+  const [deptFilter,setDeptFilter]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [search,setSearch]=useState(''); const [sem,setSem]=useSem(profile.role)
+  const [editTask,setEditTask]=useState(null); const [editEvent,setEditEvent]=useState(null)
+  async function load(){
+    let tq=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name,department)').eq('status','completed').order('completed_at',{ascending:false})
+    if(worker) tq=tq.eq('assigned_to',profile.id); else tq=tq.in('department',managedTaskDepts(role))
+    const {data}=await tq; setTasks(data||[])
+    if(privileged){ const {data:ev}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,sorted_at,duties,profiles(full_name))').eq('department','Media').in('status',['completed','done']).order('start_at',{ascending:false}); setEvents(ev||[]) }
+    setLoading(false)
+  }
+  useEffect(()=>{ setLoading(true); load() },[profile.id]); usePoll(load)
+  async function del(id){ if(!await confirmDialog({title:'Delete task?',body:'This removes the task for everyone. This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('tasks').delete().eq('id',id); load() }
+  async function delEvent(id){ if(!await confirmDialog({title:'Delete event?',body:'This removes the event for everyone. This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('schedules').delete().eq('id',id); load() }
+  const q=search.trim().toLowerCase()
+  const filteredTasks=tasks.filter(t=>inSem(t,sem)&&(!deptFilter||t.department===deptFilter)&&(!dateFilter||t.assigned_date===dateFilter||(t.completed_at&&localISO(t.completed_at)===dateFilter))&&(!q||`${t.title} ${t.profiles?.full_name||''} ${t.department}`.toLowerCase().includes(q)))
+  const filteredEvents=events.filter(e=>inSem(e,sem)&&(!deptFilter||deptFilter==='Media')&&(!dateFilter||localISO(e.start_at)===dateFilter||(e.sorted_at&&localISO(e.sorted_at)===dateFilter))&&(!q||`${e.title} ${mediaNames(e)} ${colorNames(e,tasks)}`.toLowerCase().includes(q)))
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">COMPLETED WORK</div><h1>Tracker</h1><p>Everything finished, with who did it and when.</p></div><SemSwitch value={sem} onChange={setSem}/></section>
+    <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event, task or person…" extraActive={!!deptFilter} onClear={()=>setDeptFilter('')}>
+      {privileged && <label>Department<Select className="filter-select" value={deptFilter} onChange={e=>setDeptFilter(e.target.value)}><option value="">All</option>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</Select></label>}
+    </FilterBar>
+    {privileged && <>
+      <div className="eyebrow" style={{margin:'6px 0 8px'}}>EVENTS — MEDIA</div>
+      <div className="panel table-panel" style={{marginBottom:20}}>
+        <div className={`table-head trk-events ${canEvent?'':'no-action'}`}><span>Event date</span><span>Event name</span><span>Medias</span><span>Sorted on</span><span>Status</span>{canEvent && <span>Action</span>}</div>
+        {loading ? <div className="empty">Loading…</div> : filteredEvents.map(e=><div className={`table-row trk-events ${canEvent?'':'no-action'}`} key={e.id}>
+          <span data-label="Event date">{fmtDay(e.start_at)}</span><strong className="row-title">{e.title}</strong>
+          <span data-label="Medias">{mediaNames(e)||'—'}{colorNames(e,tasks) && <small className="sub">Colorist: {colorNames(e,tasks)}</small>}</span>
+          <span data-label="Sorted on">{e.sorted_at?fmtDay(e.sorted_at):'—'}</span>
+          <span data-label="Status"><span className={`status ${e.status}`}>{e.status==='completed'?'sorted':e.status}</span></span>
+          {canEvent && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEditEvent(e)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>delEvent(e.id)}><Trash2 size={14}/></button></span>}
+        </div>)}
+        {!loading && !filteredEvents.length && <div className="empty">No sorted events found.</div>}
+      </div>
+    </>}
+    <div className="eyebrow" style={{margin:'6px 0 8px'}}>TASKS — {privileged?'ALL':(profile.department||'').toUpperCase()}</div>
+    <div className="panel table-panel">
+      <div className={`table-head trk-tasks ${canTask?'':'no-action'}`}><span>Task</span><span>Department</span><span>Assignee</span><span>Assigned</span><span>Done</span>{canTask && <span>Action</span>}</div>
+      {loading ? <div className="empty">Loading…</div> : filteredTasks.map(t=><div className={`table-row trk-tasks ${canTask?'':'no-action'}`} key={t.id}>
+        <strong className="row-title">{t.title}</strong><span data-label="Department">{t.department}</span><span data-label="Assignee">{t.profiles?.full_name||'Unassigned'}</span><span data-label="Assigned">{fmtDay(t.assigned_date)}</span><span data-label="Done">{t.completed_at?fmtDay(t.completed_at):'—'}</span>
+        {canTask && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEditTask(t)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(t.id)}><Trash2 size={14}/></button></span>}
+      </div>)}
+      {!loading && !filteredTasks.length && <div className="empty">Nothing completed yet.</div>}
+    </div>
+    {editTask && <EditTaskModal task={editTask} onClose={()=>setEditTask(null)} onSaved={load}/>}
+    {editEvent && <EditScheduleModal schedule={editEvent} onClose={()=>setEditEvent(null)} onSaved={load}/>}
+  </div>
+}
+function localISO(v){ const d=new Date(v); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` }
+
+// Task pickers: Staff first, then the EDBO board members who can colorgrade.
+function taskAssigneeGroups(members){
+  return [{label:'STAFF',people:members.filter(m=>m.role==='staff_colorist')},{label:'EDBO',people:members.filter(m=>BOARD_ASSIGNABLE.includes(m.role)).sort(dirSort)}]
+}
+function useAssignees(){
+  const [members,setMembers]=useState([])
+  useEffect(()=>{ (async()=>{ setMembers((await fetchActive()).filter(m=>m.role==='staff_colorist'||BOARD_ASSIGNABLE.includes(m.role))) })() },[])
+  return members
+}
+// The task's department follows who it is for: Art Director work stays "Art Director", everything else is colorgrading.
+function deptFromAssignee(members,id){ return members.find(m=>m.id===id)?.role==='art_director'?'Art Director':'Colorist' }
+
+function TaskModal({profile,onClose,onSaved,initialDate}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const [form,setForm]=useState({title:'Colorgrading',description:'',assignedIds:[],assigned_date:initialDate||todayISO()})
+  const members=useAssignees(); const [busy,setBusy]=useState(false)
+  async function save(e){ e.preventDefault()
+    if(!form.assignedIds.length){ notifyDialog('Pick who the task is for.'); return }
+    setBusy(true)
+    const {error}=await supabase.from('tasks').insert({ title:form.title, description:form.description||null, department:deptFromAssignee(members,form.assignedIds[0]), assigned_to:form.assignedIds[0], assigned_date:form.assigned_date||todayISO(), created_by:profile.id, ...(semFor(form.assigned_date||todayISO(),sp)?{semester:semFor(form.assigned_date||todayISO(),sp)}:{}) })
+    setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
+  }
+  return <Modal title="Create task" onClose={onClose}><form onSubmit={save}>
+    <label>Title<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <label>Assign to</label>
+    <PersonPicker groups={taskAssigneeGroups(members)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
+    <label>Assigned date<DateField required value={form.assigned_date} onChange={v=>setForm({...form,assigned_date:v})}/></label>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Create task'}</button></div>
+  </form></Modal>
+}
+
+function EditTaskModal({task,onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const [form,setForm]=useState({title:task.title,description:task.description||'',assignedIds:task.assigned_to?[task.assigned_to]:[],assigned_date:task.assigned_date||todayISO()})
+  const members=useAssignees(); const [busy,setBusy]=useState(false)
+  async function save(e){ e.preventDefault(); setBusy(true)
+    const patch={ title:form.title, description:form.description||null, assigned_to:form.assignedIds[0]||null, assigned_date:form.assigned_date||null, ...(semFor(form.assigned_date,sp)?{semester:semFor(form.assigned_date,sp)}:{}) }
+    if(form.assignedIds[0] && form.assignedIds[0]!==task.assigned_to) patch.department=deptFromAssignee(members,form.assignedIds[0])
+    const {error}=await supabase.from('tasks').update(patch).eq('id',task.id)
+    setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
+  }
+  return <Modal title="Edit task" onClose={onClose}><form onSubmit={save}>
+    <label>Title<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <label>Assign to</label>
+    <PersonPicker groups={taskAssigneeGroups(members)} value={form.assignedIds} multi={false} onChange={ids=>setForm({...form,assignedIds:ids})}/>
+    <label>Assigned date<DateField required value={form.assigned_date} onChange={v=>setForm({...form,assigned_date:v})}/></label>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Save changes'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Calendar (mode-aware, works for everyone) ---------------- */
+function CalendarPage({profile}){
+  const role=profile.role; const staff=isStaff(role); const worker=isWorker(role)
+  const effMode = (seesAll(role)||isTD(role)||role==='art_director') ? 'all' : roleMode(role)
+  const [month,setMonth]=useState(()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); return d })
+  const [items,setItems]=useState([]) // unified {id,title,date,type,raw}
+  const [selected,setSelected]=useState(null)
+  const [openSchedule,setOpenSchedule]=useState(false)
+  const [openTask,setOpenTask]=useState(false)
+  const [editItem,setEditItem]=useState(null)
+  const [editMode,setEditMode]=useState(false) // pop-up switch: View (clean) / Edit (buttons)
+  const gridStart=useMemo(()=>{ const d=new Date(month); d.setDate(1-d.getDay()); return d },[month])
+  const gridDays=useMemo(()=>Array.from({length:42},(_,i)=>{ const d=new Date(gridStart); d.setDate(gridStart.getDate()+i); return d }),[gridStart])
+
+  useEffect(()=>{ load() },[profile.id,month]); usePoll(()=>load())
+
+  async function load(){
+    const rangeStart=new Date(gridStart); const rangeEnd=new Date(gridStart); rangeEnd.setDate(rangeEnd.getDate()+42)
+    let unified=[]
+    if(effMode==='hours' || effMode==='all' || role==='staff_colorist'){
+      let sq=supabase.from('schedules').select('*,schedule_members(member_id,sorted,duties,profiles(full_name))').gte('start_at',rangeStart.toISOString()).lt('start_at',rangeEnd.toISOString()).order('start_at')
+      if(effMode==='hours') sq=sq.eq('department',profile.department); else if(role==='staff_colorist') sq=sq.eq('department','Media')
+      const {data}=await sq; let rows=data||[]
+      if(staff) rows=rows.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===profile.id) || (hasSlots(s)&&hasOpenDuty(s)))
+      unified=unified.concat(rows.map(s=>({id:'s-'+s.id,title:s.title,date:new Date(s.start_at),type:'schedule',raw:s})))
+    }
+    if(effMode==='tasks' || effMode==='all'){
+      let tq=supabase.from('tasks').select('*,profiles!tasks_assigned_to_fkey(full_name)').not('assigned_date','is',null).gte('assigned_date',localISO(rangeStart)).lt('assigned_date',localISO(rangeEnd))
+      if(effMode==='tasks'){ if(worker) tq=tq.eq('assigned_to',profile.id); else tq=tq.in('department',managedTaskDepts(role)) }
+      else if(!seesAll(role)) tq=tq.or(`assigned_to.eq.${profile.id}${isTD(role)?',department.eq.Colorist':''}`)
+      const {data}=await tq; let rows=data||[]
+      unified=unified.concat(rows.map(t=>({id:'t-'+t.id,title:t.title,date:new Date(t.assigned_date+'T00:00:00'),type:'task',raw:t})))
+    }
+    setItems(unified)
+    setSelected(sel=>sel ? {date:sel.date, items:unified.filter(e=>sameDay(e.date,sel.date))} : sel)
+  }
+
+  function eventsOn(d){ return items.filter(e=>sameDay(e.date,d)) }
+  const canAddEvent=(effMode==='hours'||effMode==='all')&&canCreateSchedule(role), canAddTask=(effMode==='tasks'||effMode==='all')&&canCreateTask(role)
+  const [createDate,setCreateDate]=useState(null)
+  function pickDay(d){ const list=eventsOn(d)
+    if(!list.length && (canAddEvent!==canAddTask)){ setCreateDate(localISO(d)); if(canAddEvent) setOpenSchedule(true); else setOpenTask(true); return }   // empty day + only one thing to create: open it straight away
+    if(list.length||canAddEvent||canAddTask) setSelected({date:d,items:list}) }
+  function startCreate(kind){ const d=localISO(selected.date); setCreateDate(d); setSelected(null); if(kind==='event') setOpenSchedule(true); else setOpenTask(true) }
+  const gridRef=useRef(null), slideDir=useRef(0), swp=useRef(null), wheelAt=useRef(0)
+  function shiftMonth(n){ slideDir.current=n; const d=new Date(month); d.setMonth(d.getMonth()+n); setMonth(d) }
+  useEffect(()=>{ const g=gridRef.current; const n=slideDir.current; slideDir.current=0; if(g&&n&&g.animate) g.animate([{opacity:0,transform:`translateX(${n*38}px)`},{opacity:1,transform:'translateX(0)'}],{duration:420,easing:'cubic-bezier(.22,1,.36,1)'}) },[month])
+  const onTS=e=>{ if(e.touches.length===1) swp.current={x:e.touches[0].clientX,y:e.touches[0].clientY,t:Date.now()} }
+  const onTE=e=>{ const a=swp.current; swp.current=null; if(!a) return; const dx=e.changedTouches[0].clientX-a.x, dy=e.changedTouches[0].clientY-a.y; if(Math.abs(dx)>48&&Math.abs(dx)>Math.abs(dy)*1.4) shiftMonth(dx<0?1:-1) }
+  const onWheelCal=e=>{ if(Math.abs(e.deltaX)>Math.abs(e.deltaY)*1.2 && Math.abs(e.deltaX)>18 && Date.now()-wheelAt.current>650){ wheelAt.current=Date.now(); shiftMonth(e.deltaX>0?1:-1) } }
+  const monthLabel=month.toLocaleDateString([], {month:'long',year:'numeric'}); const today=new Date()
+  const upcoming=items.filter(e=>{ const st=e.raw.status; return e.date>=new Date(today.getFullYear(),today.getMonth(),today.getDate()) && st!=='completed' && st!=='done' }).sort((a,b)=>a.date-b.date).slice(0,8)
+
+  const markMySorted=scheduleId=>supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',scheduleId).eq('member_id',profile.id)
+  // Admin / EDBO only: sort the whole event on everyone's behalf.
+  async function markAllSorted(sched){
+    if(new Date(sched.end_at)>new Date()){ notifyDialog('This event has not ended yet. You can mark it sorted once it is over.'); return }
+    if(!await confirmDialog({title:'Mark whole event sorted?',body:'This marks every assigned photographer as sorted.',confirmLabel:'Mark sorted'})) return
+    const n=(sched.schedule_members||[]).length
+    const r= n ? await supabase.from('schedule_members').update({sorted:true}).eq('schedule_id',sched.id) : await supabase.from('schedules').update({status:'completed'}).eq('id',sched.id)
+    if(r.error) notifyDialog(r.error.message); load()
+  }
+  const markTaskDone=id=>supabase.from('tasks').update({status:'completed',completed_at:new Date().toISOString()}).eq('id',id)
+  async function deleteItem(item){ if(!await confirmDialog({title:'Delete this?',body:'This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; if(item.type==='task') await supabase.from('tasks').delete().eq('id',item.raw.id); else await supabase.from('schedules').delete().eq('id',item.raw.id); setSelected(null); load() }
+  const canEdit=item=> item.type==='task' ? (isAdminLike(role)||(isTD(role)&&item.raw.department==='Colorist')) : canCreateSchedule(role)
+  const anyEditable=!!selected && selected.items.some(canEdit)
+
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">PLANNING</div><h1>Team calendar</h1><p>{worker?'Your assigned schedule.':'Create and review events and tasks.'}</p></div>
+      <div style={{display:'flex',gap:8}}>
+        {(effMode==='hours'||effMode==='all') && canCreateSchedule(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenSchedule(true) }}><Plus size={17}/> New event</button>}
+        {(effMode==='tasks'||effMode==='all') && canCreateTask(role) && <button className="primary-btn" onClick={()=>{ setCreateDate(null); setOpenTask(true) }}><Plus size={17}/> New task</button>}
+      </div></section>
+    <div className="panel calendar" onTouchStart={onTS} onTouchEnd={onTE} onWheel={onWheelCal}>
+      <div className="cal-toolbar"><button className="icon-btn" onClick={()=>shiftMonth(-1)}><ChevronLeft size={16}/></button><strong>{monthLabel}</strong><button className="icon-btn" onClick={()=>shiftMonth(1)}><ChevronRight size={16}/></button>
+        <button className="text-btn" style={{marginLeft:'auto'}} onClick={()=>{ const d=new Date(); d.setDate(1); d.setHours(0,0,0,0); setMonth(d) }}>Today</button></div>
+      <div className="calendar-days">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d=><div key={d}>{d}</div>)}</div>
+      <div className="calendar-grid" ref={gridRef}>{gridDays.map((d,i)=>{ const list=eventsOn(d); const inMonth=d.getMonth()===month.getMonth(); const isToday=sameDay(d,today)
+        return <div key={i} className={`day ${list.length?'has-event':''} ${inMonth?'':'muted'} ${isToday?'today':''}`} onClick={()=>{ setEditMode(false); pickDay(d) }}>
+          <b>{d.getDate()}</b>{list.slice(0,2).map(e=><span key={e.id}>{e.title}</span>)}{list.length>2 && <span className="more">+{list.length-2} more</span>}
+        </div> })}</div>
+    </div>
+    <div className="panel task-panel" style={{marginTop:14}}>
+      <div className="panel-title"><h2>Upcoming</h2></div>
+      <div className="task-list">{upcoming.map(e=><div className="task-row" key={e.id} onClick={()=>{ setEditMode(false); pickDay(e.date) }} style={{cursor:'pointer'}}>
+        <div className={`task-icon ${e.type==='task'?'layout':'media'}`}>{e.type==='task'?<CheckSquare size={16}/>:<CalendarDays size={16}/>}</div>
+        <div className="task-info"><strong>{e.title}</strong><span>{fmtDay(e.date,false)}{e.type!=='task'?` • ${fmtTime(e.raw.start_at)}`:''}</span></div>
+        <span className={`status ${e.raw.status}`}>{e.raw.status.replace('_',' ')}</span>
+      </div>)}
+      {!upcoming.length && <div className="empty">Nothing upcoming.</div>}</div>
+    </div>
+    {selected && <Modal title={selected.date.toLocaleDateString([], {weekday:'long',month:'long',day:'numeric',year:'numeric'})} onClose={()=>setSelected(null)}>
+      {anyEditable && <Seg value={editMode?'e':'v'} onChange={v=>setEditMode(v==='e')} options={[['v',<><Eye size={13}/> View</>],['e',<><Pencil size={13}/> Edit</>]]}/>}
+
+      {(canAddEvent||canAddTask) && <div className="day-add top">
+        {canAddEvent && <button type="button" className="primary-btn" onClick={()=>startCreate('event')}><Plus size={16}/> New event on this day</button>}
+        {canAddTask && <button type="button" className={canAddEvent?'secondary-btn':'primary-btn'} onClick={()=>startCreate('task')}><Plus size={16}/> New task on this day</button>}
+      </div>}
+      {selected.items.length===0 && <div className="empty" style={{padding:'18px 0 6px'}}>Nothing planned for this day yet.</div>}
+      {selected.items.map(e=><div key={e.id} className="day-detail-row">
+        <strong>{e.title}</strong>
+        {e.type==='schedule' && <><span>{e.raw.department} • {fmtTime(e.raw.start_at)} – {fmtTime(e.raw.end_at)} ({Math.max(0,(new Date(e.raw.end_at)-new Date(e.raw.start_at))/3600000).toFixed(1)}h)</span>
+          <span>Where: {e.raw.location||'No location'}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status==='completed'?'sorted':e.raw.status}{e.raw.sorted_at?` (${fmtDay(e.raw.sorted_at,false)})`:''}</span></>}
+        {e.type==='task' && <><span>{e.raw.department} • Assigned to {e.raw.profiles?.full_name||'Unassigned'}</span>
+          <span>Assigned {fmtDay(e.raw.assigned_date)}{e.raw.completed_at?` • Done ${fmtDay(e.raw.completed_at)}`:''}</span>{e.raw.description && <span>{e.raw.description}</span>}<span>Status: {e.raw.status.replace('_',' ')}</span></>}
+        {e.type==='schedule' && <DutyGrab sched={e.raw} profile={profile} onChanged={load}/>}
+        {e.type==='schedule' && e.raw.legacy_media && <span>Media: {e.raw.legacy_media}</span>}
+        {e.type==='schedule' && e.raw.legacy_colorist && <span>Colorist: {e.raw.legacy_colorist}</span>}
+        {e.type==='schedule' && e.raw.schedule_members?.length>0 && <div className="member-chips">{e.raw.schedule_members.map(m=><span key={m.member_id} className={`${m.sorted?'done':''} ${m.member_id===profile.id?'me':''}`}>{crewText(m)}{!needsSort(m)?'':m.sorted?' ✓ sorted':' • pending'}{m.member_id===profile.id?' (you)':''}</span>)}</div>}
+        <div style={{marginTop:8,display:'flex',gap:8,flexWrap:'wrap'}}>
+          {e.type==='schedule' && e.raw.status!=='completed' && (e.raw.schedule_members||[]).some(m=>m.member_id===profile.id && !m.sorted && needsSort(m)) && (new Date(e.raw.end_at)<=new Date()
+            ? <ActionButton label="I've sorted my part" doneLabel="Sorted" run={()=>markMySorted(e.raw.id)} after={load}/>
+            : <button type="button" className="ghost-btn" disabled title="Available after the event ends">Sorted — after the event ends</button>)}
+          {editMode && e.type==='schedule' && e.raw.status!=='completed' && isAdminLike(role) && (new Date(e.raw.end_at)<=new Date()
+            ? <button className="ghost-btn" onClick={()=>markAllSorted(e.raw)}>Mark all sorted</button>
+            : <button type="button" className="ghost-btn" disabled title="Available after the event ends">Mark all sorted — after the event ends</button>)}
+          {e.type==='task' && e.raw.status!=='completed' && (e.raw.assigned_to===profile.id || isAdminLike(role)) && <ActionButton label={e.raw.department==='Colorist'?'Colorgraded':'Mark done'} doneLabel={e.raw.department==='Colorist'?'Colorgraded':'Done'} run={()=>markTaskDone(e.raw.id)} after={load}/>}
+          {editMode && canEdit(e) && <button className="ghost-btn" onClick={()=>setEditItem(e)}><Pencil size={13}/> Edit</button>}
+          {editMode && canEdit(e) && <button className="danger-btn" onClick={()=>deleteItem(e)}><Trash2 size={13}/> Delete</button>}
+        </div>
+      </div>)}
+    </Modal>}
+    {openSchedule && <ScheduleModal profile={profile} initialDate={createDate} onClose={()=>setOpenSchedule(false)} onSaved={load}/>}
+    {openTask && <TaskModal profile={profile} initialDate={createDate} onClose={()=>setOpenTask(false)} onSaved={load}/>}
+    {editItem?.type==='schedule' && <EditScheduleModal schedule={editItem.raw} onClose={()=>setEditItem(null)} onSaved={()=>{ load(); setSelected(null) }}/>}
+    {editItem?.type==='task' && <EditTaskModal task={editItem.raw} onClose={()=>setEditItem(null)} onSaved={()=>{ load(); setSelected(null) }}/>}
+  </div>
+}
+
+// Who is on an event: Media first, then EDBO. Tapping a name adds them and pops the duty tags (PM / PC / VM / VC) right beside it.
+function CrewPicker({people,value,onChange}){
+  const groups=[{label:'MEDIA STAFF',people:people.filter(p=>p.role==='staff_media')},{label:'COLORIST STAFF',people:people.filter(p=>p.role==='staff_colorist')},{label:'EDBO',people:people.filter(p=>EVENT_BOARD.includes(p.role)).sort(dirSort)}]
+  function toggle(id){ const n={...value}; if(n[id]) delete n[id]; else n[id]=[]; onChange(n) }
+  function duty(id,d){ const cur=value[id]||[]; onChange({...value,[id]:cur.includes(d)?cur.filter(x=>x!==d):[...cur,d]}) }
+  return <div className="token-picker">
+    {groups.map(g=>g.people.length>0 && <div key={g.label} className="token-group"><div className="token-group-label">{g.label}</div>
+      <div className="token-row">{g.people.map(p=>{ const on=!!value[p.id]; return <span key={p.id} className={`crew-item ${on?'on':''}`}>
+        <button type="button" className={`token ${on?'active':''}`} onClick={()=>toggle(p.id)}>{p.full_name}</button>
+        <span className="duty-pills" aria-hidden={!on}>{DUTIES.map(([k,t],i)=><button type="button" tabIndex={on?0:-1} key={k} title={t} style={{'--i':i}} className={(value[p.id]||[]).includes(k)?'on':''} onClick={()=>duty(p.id,k)}>{k}</button>)}</span>
+      </span> })}</div></div>)}
+    <div className="duty-legend">Duty (optional): <b>PM</b> Photo Main · <b>PC</b> Photo Creative · <b>VM</b> Video Main · <b>VC</b> Video Creative</div>
+  </div>
+}
+
+function SlotsPicker({value,onChange}){
+  const set=(d,n)=>onChange({...value,[d]:Math.max(0,Math.min(20,(Number(value[d])||0)+n))})
+  return <div className="slots-picker">
+    <div className="slots-grid">{DUTIES.map(([d,t])=><div key={d} className="slot-step"><span className="ss-name"><b>{d}</b><small>{t}</small></span>
+      <div className="stepper"><button type="button" onClick={()=>set(d,-1)} aria-label={`Fewer ${d}`}>−</button><em>{Number(value[d])||0}</em><button type="button" onClick={()=>set(d,1)} aria-label={`More ${d}`}>+</button></div></div>)}</div>
+    <div className="duty-legend">Spots members can grab on their own. Leave everything at 0 if you only want to assign people yourself — you can do both.</div>
+  </div>
+}
+function useEventPeople(){
+  const [people,setPeople]=useState([])
+  useEffect(()=>{ (async()=>{ setPeople((await fetchActive()).filter(m=>m.role==='staff_media'||m.role==='staff_colorist'||EVENT_BOARD.includes(m.role))) })() },[])
+  return people
+}
+
+function ScheduleModal({profile,onClose,onSaved,initialDate}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const [form,setForm]=useState({title:'',description:'',location:'',date:initialDate||todayISO(),start:'',end:'',crew:{},slots:{}})
+  const people=useEventPeople(); const [busy,setBusy]=useState(false)
+  async function save(e){ e.preventDefault()
+    if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
+    setBusy(true)
+    const start_at=new Date(`${form.date}T${form.start}`).toISOString(); const end_at=new Date(`${form.date}T${form.end}`).toISOString()
+    const {data:sched,error}=await supabase.from('schedules').insert({ title:form.title, description:form.description||null, location:form.location||null, department:'Media', start_at, end_at, created_by:profile.id, ...(semFor(form.date,sp)?{semester:semFor(form.date,sp)}:{}), ...(Object.keys(cleanSlots(form.slots)).length?{slots:cleanSlots(form.slots)}:{}) }).select().single()
+    if(error){ notifyDialog(error.message); setBusy(false); return }
+    const ids=Object.keys(form.crew)
+    if(ids.length){ const {error:me}=await supabase.from('schedule_members').insert(ids.map(id=>({schedule_id:sched.id,member_id:id,duties:form.crew[id]}))); if(me) notifyDialog(me.message) }
+    setBusy(false); onClose(); onSaved()
+  }
+  return <Modal title="New event" onClose={onClose}><form onSubmit={save}>
+    <label>Event name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <label>Date<DateField required value={form.date} onChange={v=>setForm({...form,date:v})}/></label>
+    <div className="form-row">
+      <label>Start time<TimeField required value={form.start} onChange={v=>setForm({...form,start:v})}/></label>
+      <label>End time<TimeField required value={form.end} onChange={v=>setForm({...form,end:v})}/></label>
+    </div>
+    <label>Location<input value={form.location} onChange={e=>setForm({...form,location:e.target.value})}/></label>
+    <label>Assigned to</label>
+    <CrewPicker people={people} value={form.crew} onChange={crew=>setForm({...form,crew})}/>
+    <label>Open duties (members can claim)</label>
+    <SlotsPicker value={form.slots} onChange={slots=>setForm({...form,slots})}/>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Create event'}</button></div>
+  </form></Modal>
+}
+
+function EditScheduleModal({schedule,onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const start=new Date(schedule.start_at); const end=new Date(schedule.end_at)
+  const toTime=d=>d.toTimeString().slice(0,5)
+  const [form,setForm]=useState({title:schedule.title,description:schedule.description||'',location:schedule.location||'',date:localISO(start),start:toTime(start),end:toTime(end),crew:{},slots:{...(schedule.slots||{})}})
+  const people=useEventPeople(); const [busy,setBusy]=useState(false); const [before,setBefore]=useState({})
+  useEffect(()=>{ (async()=>{
+    const {data:existing}=await supabase.from('schedule_members').select('member_id,duties').eq('schedule_id',schedule.id)
+    const c={}; (existing||[]).forEach(m=>{ c[m.member_id]=m.duties||[] }); setBefore(c); setForm(f=>({...f,crew:c}))
+  })() },[])
+  async function save(e){ e.preventDefault()
+    if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
+    setBusy(true)
+    const start_at=new Date(`${form.date}T${form.start}`).toISOString(); const end_at=new Date(`${form.date}T${form.end}`).toISOString()
+    const {error}=await supabase.from('schedules').update({ title:form.title, description:form.description||null, location:form.location||null, start_at, end_at, ...(semFor(form.date,sp)?{semester:semFor(form.date,sp)}:{}), ...((Object.keys(cleanSlots(form.slots)).length||hasSlots(schedule))?{slots:cleanSlots(form.slots)}:{}) }).eq('id',schedule.id)
+    if(error){ notifyDialog(error.message); setBusy(false); return }
+    const have=Object.keys(before), now=Object.keys(form.crew)
+    const removed=have.filter(id=>!now.includes(id)); const added=now.filter(id=>!have.includes(id))
+    const changed=now.filter(id=>have.includes(id) && JSON.stringify([...(before[id]||[])].sort())!==JSON.stringify([...(form.crew[id]||[])].sort()))
+    if(removed.length) await supabase.from('schedule_members').delete().eq('schedule_id',schedule.id).in('member_id',removed)
+    if(added.length) await supabase.from('schedule_members').insert(added.map(id=>({schedule_id:schedule.id,member_id:id,duties:form.crew[id]})))
+    for(const id of changed) await supabase.from('schedule_members').update({duties:form.crew[id]}).eq('schedule_id',schedule.id).eq('member_id',id)
+    setBusy(false); onClose(); onSaved()
+  }
+  return <Modal title="Edit event" onClose={onClose}><form onSubmit={save}>
+    <label>Event name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Description<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <label>Date<DateField required value={form.date} onChange={v=>setForm({...form,date:v})}/></label>
+    <div className="form-row">
+      <label>Start time<TimeField required value={form.start} onChange={v=>setForm({...form,start:v})}/></label>
+      <label>End time<TimeField required value={form.end} onChange={v=>setForm({...form,end:v})}/></label>
+    </div>
+    <label>Location<input value={form.location} onChange={e=>setForm({...form,location:e.target.value})}/></label>
+    <label>Assigned to</label>
+    <CrewPicker people={people} value={form.crew} onChange={crew=>setForm({...form,crew})}/>
+    <label>Open duties (members can claim)</label>
+    <SlotsPicker value={form.slots} onChange={slots=>setForm({...form,slots})}/>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Save changes'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Tracker (Head Media / Media: sorted events ledger) ---------------- */
+function Tracker({profile}){
+  const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null); const [addPast,setAddPast]=useState(false)
+  const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role)
+  const can=canCreateSchedule(profile.role); const staff=isStaff(profile.role)
+  async function load(){
+    const {data}=await supabase.from('schedules').select('*,schedule_members(member_id,sorted,sorted_at,duties,profiles(full_name))').eq('department','Media').in('status',['completed','done']).order('start_at',{ascending:false})
+    let list=data||[]
+    if(staff) list=list.filter(s=>(s.schedule_members||[]).some(m=>m.member_id===profile.id))
+    setRows(list)
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load)
+  async function del(id){ if(!await confirmDialog({title:'Delete event?',body:'This cannot be undone.',danger:true,confirmLabel:'Delete'})) return; await supabase.from('schedules').delete().eq('id',id); load() }
+  const q=search.trim().toLowerCase()
+  const shown=rows.filter(r=>inSem(r,sem)&&(!dateFilter||localISO(r.start_at)===dateFilter||(r.sorted_at&&localISO(r.sorted_at)===dateFilter))&&(!q||`${r.title} ${mediaNames(r)}`.toLowerCase().includes(q)))
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">FULL LEDGER</div><h1>Tracker</h1><p>Sorted events, who covered them, and when they were sorted.</p></div><div className="head-actions">{can && <button className="primary-btn" onClick={()=>setAddPast(true)}><Plus size={17}/> Add past event</button>}<SemSwitch value={sem} onChange={setSem}/></div></section>
+    <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event or media…"/>
+    <div className="panel table-panel">
+      <div className={`table-head trk-media ${can?'':'no-action'}`}><span>Event date</span><span>Event name</span><span>Medias</span><span>Sorted on</span><span>Status</span>{can && <span>Action</span>}</div>
+      {shown.map(r=><div className={`table-row trk-media ${can?'':'no-action'}`} key={r.id}>
+        <span data-label="Event date">{fmtDay(r.start_at)}<small className="sub">{fmtTime(r.start_at)}–{fmtTime(r.end_at)} · {Math.max(0,(new Date(r.end_at)-new Date(r.start_at))/3600000).toFixed(1)}h</small></span>
+        <strong className="row-title">{r.title}</strong>
+        <span data-label="Medias">{mediaNames(r)||'—'}</span>
+        <span data-label="Sorted on">{r.sorted_at?fmtDay(r.sorted_at):'—'}</span>
+        <span data-label="Status"><span className={`status ${r.status}`}>{r.status==='completed'?'sorted':r.status}</span></span>
+        {can && <span className="row-actions"><button className="icon-btn" title="Edit" onClick={()=>setEdit(r)}><Pencil size={14}/></button><button className="icon-btn" title="Delete" onClick={()=>del(r.id)}><Trash2 size={14}/></button></span>}</div>)}
+      {!shown.length && <div className="empty">Nothing sorted yet.</div>}
+    </div>
+    {edit && <EditScheduleModal schedule={edit} onClose={()=>setEdit(null)} onSaved={load}/>}
+    {addPast && <AddPastEventModal onClose={()=>setAddPast(false)} onSaved={load}/>}
+  </div>
+}
+
+// Add an event that was missed: already sorted, hours from start/end, crew without PM/PC/VM/VC. Edit the row afterwards to fix hours.
+function AddPastEventModal({onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const [form,setForm]=useState({title:'',date:todayISO(),start:'',end:'',sortedOn:'',crew:[]})
+  const people=useEventPeople(); const [busy,setBusy]=useState(false)
+  async function save(e){ e.preventDefault()
+    if(form.end<form.start){ notifyDialog('End time must be after the start time.'); return }
+    setBusy(true)
+    const start=new Date(`${form.date}T${form.start}`).toISOString(), end=new Date(`${form.date}T${form.end}`).toISOString()
+    const sorted=new Date(`${form.sortedOn||form.date}T12:00`).toISOString()
+    const {error}=await supabase.rpc('add_past_event',{p_title:form.title,p_start:start,p_end:end,p_sorted_at:sorted,p_members:form.crew,p_semester:semFor(form.date,sp)||null})
+    setBusy(false)
+    if(error){ notifyDialog(error.message.includes('add_past_event')?'Run supabase/past-event.sql in the Supabase SQL editor first.':error.message); return }
+    onClose(); onSaved()
+  }
+  const hrs=form.start&&form.end&&form.end>=form.start?((new Date(`2000-01-01T${form.end}`)-new Date(`2000-01-01T${form.start}`))/3600000).toFixed(1):null
+  return <Modal title="Add past event" onClose={onClose}><form onSubmit={save}>
+    <p className="cc-note" style={{marginTop:0}}>For an event that was missed. It is added as already sorted, and the hours count for everyone you pick.</p>
+    <label>Event name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Event date<DateField required value={form.date} onChange={v=>setForm({...form,date:v})}/></label>
+    <div className="form-row">
+      <label>Start time<TimeField required value={form.start} onChange={v=>setForm({...form,start:v})}/></label>
+      <label>End time<TimeField required value={form.end} onChange={v=>setForm({...form,end:v})}/></label>
+    </div>
+    {hrs && <p className="cc-note" style={{margin:'0 0 8px'}}>{hrs} hours</p>}
+    <label>Sorted on (optional)<DateField value={form.sortedOn} onChange={v=>setForm({...form,sortedOn:v})}/></label>
+    <label>Who covered it</label>
+    <PersonPicker groups={[
+      {label:'MEDIA',people:people.filter(p=>p.role==='staff_media')},
+      {label:'COLORIST',people:people.filter(p=>p.role==='staff_colorist')},
+      {label:'EDBO',people:people.filter(p=>EVENT_BOARD.includes(p.role))},
+    ]} value={form.crew} multi={true} onChange={ids=>setForm({...form,crew:ids})}/>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Adding…':'Add event'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Announcements (admin only) ---------------- */
+function Announcements({profile}){
+  const [rows,setRows]=useState([]); const [open,setOpen]=useState(false)
+  useEffect(()=>{ load() },[])
+  async function load(){ const {data}=await supabase.from('announcements').select('*').order('created_at',{ascending:false}); setRows(data||[]) }
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">TEAM-WIDE</div><h1>Announcements</h1><p>Send a message to everyone, all heads, all staff, or handpicked people.</p></div>
+      <button className="primary-btn" onClick={()=>setOpen(true)}><Megaphone size={17}/> New announcement</button></section>
+    <div className="panel table-panel">
+      {rows.map(a=><div key={a.id} style={{padding:'18px',borderTop:'1px solid var(--border)'}}>
+        <strong style={{display:'block',fontSize:14}}>{a.title}</strong>
+        <p style={{margin:'6px 0',color:'var(--text-dim)',fontSize:12,lineHeight:1.6}}>{a.body}</p>
+        <small style={{color:'var(--text-dim)',fontSize:10}}>To: {a.audience} • {new Date(a.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
+      </div>)}
+      {!rows.length && <div className="empty">No announcements sent yet.</div>}
+    </div>
+    {open && <AnnouncementModal profile={profile} onClose={()=>setOpen(false)} onSaved={load}/>}
+  </div>
+}
+function AnnouncementModal({profile,onClose,onSaved}){
+  const [form,setForm]=useState({title:'',body:'',audience:'all',target:[]})
+  const [people,setPeople]=useState([]); const [busy,setBusy]=useState(false)
+  useEffect(()=>{ (async()=>{ const data=await fetchActive(); setPeople(data.filter(p=>ROLE_META[p.role])) })() },[])
+  async function save(e){ e.preventDefault(); setBusy(true)
+    let recipients=[]
+    if(form.audience==='all') recipients=people.map(p=>p.id)
+    else if(form.audience==='heads') recipients=people.filter(p=>isHead(p.role)).map(p=>p.id)
+    else if(form.audience==='staff') recipients=people.filter(p=>isStaff(p.role)).map(p=>p.id)
+    else recipients=form.target
+    const {error}=await supabase.from('announcements').insert({ sender_id:profile.id, title:form.title, body:form.body, audience:form.audience, target_user_ids:form.audience==='custom'?form.target:[] })
+    if(error){ notifyDialog(error.message); setBusy(false); return }
+    setBusy(false); onClose(); onSaved()
+  }
+  return <Modal title="New announcement" onClose={onClose}><form onSubmit={save}>
+    <label>Header<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Body<textarea required value={form.body} onChange={e=>setForm({...form,body:e.target.value})}/></label>
+    <label>Send to<Select value={form.audience} onChange={e=>setForm({...form,audience:e.target.value})}>
+      <option value="all">Everyone</option><option value="heads">All heads</option><option value="staff">All staff</option><option value="custom">Specific people…</option>
+    </Select></label>
+    {form.audience==='custom' && <><label>Recipients</label>
+      <PersonPicker groups={[
+        {label:'MEDIA',people:people.filter(p=>p.role==='staff_media')},
+        {label:'COLORIST',people:people.filter(p=>p.role==='staff_colorist')},
+        {label:'EDBO',people:people.filter(p=>groupOf(p.role)==='EDBO'||p.role==='admin')},
+      ]} value={form.target} multi={true} onChange={ids=>setForm({...form,target:ids})}/>
+    </>}
+    <label>By<input value={profile.full_name} disabled/></label>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Sending…':'Send announcement'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Members (roster + drill-down) ---------------- */
+function Members({profile}){
+  const [rows,setRows]=useState([]); const [open,setOpen]=useState(false); const [detail,setDetail]=useState(null)
+  const [group,setGroup]=useState(''); const [search,setSearch]=useState('')
+  const all=seesAll(profile.role); const canCreate=canManageAccounts(profile.role)
+  async function load(){
+    let data=await fetchProfiles()
+    if(!all) data=data.filter(m=>m.role===(profile.role==='head_media'?'staff_media':'staff_colorist'))
+    setRows(data.filter(m=>ROLE_META[m.role]).sort((a,b)=>((a.active===false)-(b.active===false))||dirSort(a,b)))
+  }
+  useEffect(()=>{ load() },[profile.id])
+  const q=search.trim().toLowerCase()
+  const shown=rows.filter(m=>(!group||groupOf(m.role)===group)&&(!q||`${m.full_name} ${m.position||''} ${roleLabel(m)}`.toLowerCase().includes(q)))
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">{group?group.toUpperCase():'THE TEAM'}</div><h1>Members{group?` — ${group}`:''}</h1><p>Click a member to see their full activity.</p></div>
+      {canCreate && <button className="primary-btn" onClick={()=>setOpen(true)}><Plus size={17}/> Create account</button>}</section>
+    <FilterBar search={search} onSearch={setSearch} placeholder="Search a name or position…" extraActive={!!group} onClear={()=>setGroup('')}>
+      {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
+    </FilterBar>
+    {SECTION_ORDER.map(sec=>{ const list=shown.filter(m=>groupOf(m.role)===sec); return list.length>0 && <div key={sec} className="members-section">
+      <div className="members-section-head"><h2>{sec==='Admin'?'Admin':sec==='EDBO'?'EDBO team':sec==='Media'?'Media team':'Colorist team'}</h2><span><CountUp value={list.length} dur={900}/></span></div>
+      <div className="members-grid">{list.map(m=><div className={`panel member-card ${m.active===false?'inactive':''}`} key={m.id} onClick={()=>setDetail(m)}>
+        <div className="member-top"><Avatar cls="avatar large" url={m.avatar_url} name={m.full_name}/>{m.active===false?<span className="active-dot off">● inactive</span>:<span className="active-dot">● active</span>}</div>
+        <h3>{m.full_name}</h3><p>{sec==='EDBO'?`EDBO · ${roleLabel(m)}`:roleLabel(m)}</p>
+        <div className="member-meta"><span>{sec}</span><span>{sec==='EDBO'?(m.position||'—'):(m.position||'—')}</span></div>
+      </div>)}</div>
+    </div> })}
+    {!shown.length && <div className="panel empty">No members found.</div>}
+    {open && <CreateAccountModal profile={profile} onClose={()=>setOpen(false)} onSaved={load}/>}
+    {detail && <MemberDetailModal member={detail} onClose={()=>setDetail(null)}/>}
+  </div>
+}
+
+function MemberDetailModal({member,onClose}){
+  const [events,setEvents]=useState([]); const [tasks,setTasks]=useState([]); const [loading,setLoading]=useState(true)
+  const [showLog,setShowLog]=useState(false)
+  useEffect(()=>{ (async()=>{
+    setLoading(true)
+    const {data:ev}=await supabase.from('schedules').select('*,schedule_members!inner(member_id,duties)').eq('schedule_members.member_id',member.id).order('start_at',{ascending:false})
+    const {data:tk}=await supabase.from('tasks').select('*').eq('assigned_to',member.id).order('assigned_date',{ascending:false})
+    setEvents(ev||[]); setTasks(tk||[]); setLoading(false)
+  })() },[member.id])
+  const hours=events.reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
+  const done=tasks.filter(t=>t.status==='completed').length
+  return <Modal title={member.full_name} onClose={onClose}>
+    <p style={{color:'var(--text-dim)',fontSize:12,marginTop:-8}}>{roleLabel(member)} • {groupOf(member.role)}</p>
+    <div className="stats-grid" style={{gridTemplateColumns:'1fr 1fr',marginBottom:16}}>
+      <Stat title="Total Hours" value={hours.toFixed(1)} note={`${events.length} events`} icon={Clock3}/>
+      <Stat title="Tasks Completed" value={done} note={`${tasks.length} tasks in total`} icon={CheckCircle2}/>
+    </div>
+    <button type="button" className="secondary-btn wide" onClick={()=>setShowLog(true)}><History size={15}/> Show logged history</button>
+    {showLog && <Modal title={`${member.full_name} — full history`} onClose={()=>setShowLog(false)}>
+      {loading ? <div className="empty">Loading…</div> : <div style={{maxHeight:400,overflow:'auto'}}>
+        {[...events.map(r=>({k:r.start_at,id:'e'+r.id,title:r.title,meta:`${fmtDay(r.start_at)} • ${Math.max(0,(new Date(r.end_at)-new Date(r.start_at))/3600000).toFixed(1)}h${(r.schedule_members?.[0]?.duties||[]).length?` • ${r.schedule_members[0].duties.join('/')}`:''}`})),
+          ...tasks.map(r=>({k:r.assigned_date||r.created_at,id:'t'+r.id,title:r.title,meta:`Assigned ${fmtDay(r.assigned_date,false)} • ${r.status.replace('_',' ')}${r.completed_at?` ${fmtDay(r.completed_at,false)}`:''}`}))]
+          .sort((a,b)=>String(b.k).localeCompare(String(a.k))).map(r=><div key={r.id} style={{padding:'10px 0',borderTop:'1px solid var(--border)'}}>
+          <strong style={{fontSize:12,display:'block'}}>{r.title}</strong><span style={{fontSize:11,color:'var(--text-dim)'}}>{r.meta}</span></div>)}
+        {!events.length && !tasks.length && <div className="empty">Nothing logged yet.</div>}
+      </div>}
+    </Modal>}
+  </Modal>
+}
+
+// Account form shared by Create + Edit: pick a group; EDBO then asks for the position.
+function groupAndPositionOf(m){
+  if(m.role==='admin') return {group:'Admin',position:'Admin'}
+  if(m.role==='staff_media') return {group:'Media',position:m.position||''}
+  if(m.role==='staff_colorist') return {group:'Colorist',position:m.position||''}
+  if(m.role==='edbo'){ const hit=EDBO_POSITIONS.find(([l,r])=>r==='edbo'&&l===m.position); return {group:'EDBO',position:hit?hit[0]:'Finance'} }
+  const hit=EDBO_POSITIONS.find(([,r])=>r===m.role); return {group:'EDBO',position:hit?hit[0]:'EIC'}
+}
+function roleFromChoice(group){ return DB_ROLE[group]||'media' }
+function deptForRole(group){ return group }
+function AccountFields({form,setForm}){
+  return <>
+    <div className="form-row">
+      <label>Section<Select value={form.group} onChange={e=>setForm({...form,group:e.target.value,position:e.target.value==='EDBO'?'EIC':''})}>{ACCOUNT_GROUPS.map(g=><option key={g}>{g}</option>)}</Select></label>
+      {form.group==='EDBO'
+        ? <label>EDBO position<Select value={form.position} onChange={e=>setForm({...form,position:e.target.value})}>{EDBO_POSITIONS.map(([l])=><option key={l}>{l}</option>)}</Select></label>
+        : form.group==='Admin' ? <label>Position title<input value="Admin" disabled/></label>
+        : <label>Position title<input value={form.position} onChange={e=>setForm({...form,position:e.target.value})} placeholder={form.group==='Media'?'e.g. Photographer':'e.g. Colorist'}/></label>}
+    </div>
+    {form.group==='EDBO' && <p className="hint-note">{['EIC','AEIC'].includes(form.position)?'EIC and AEIC can add and edit everything (no Settings).':['TD','Art Director','Head Media'].includes(form.position)?`${form.position} has their own tools plus EDBO access.`:'This EDBO member can view and track everything but cannot add or edit.'}</p>}
+  </>
+}
+
+function CreateAccountModal({profile,onClose,onSaved}){
+  const [form,setForm]=useState({full_name:'',email:'',password:'',group:'Media',position:'',avatar_url:''})
+  const [busy,setBusy]=useState(false); const [err,setErr]=useState('')
+  async function save(e){ e.preventDefault(); setBusy(true); setErr('')
+    const role=roleFromChoice(form.group)
+    const {data:{session}}=await supabase.auth.getSession()
+    const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,{ method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`}, body:JSON.stringify({full_name:form.full_name,email:form.email,password:form.password,department:deptForRole(form.group),role,position:form.group==='Admin'?'Admin':form.position,avatar_url:form.avatar_url||null}) })
+    const json=await res.json().catch(()=>({})); setBusy(false)
+    if(!res.ok){ setErr(json.error||'Something went wrong.'); return }
+    onClose(); onSaved()
+  }
+  return <Modal title="Create account" onClose={onClose}><form onSubmit={save}>
+    <label>Full name<input required value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label>
+    <label>Profile picture URL<input type="url" placeholder="https://… (optional)" value={form.avatar_url} onChange={e=>setForm({...form,avatar_url:e.target.value})}/></label>
+    <div className="form-row">
+      <label>Email<input type="email" required value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/></label>
+      <label>Temporary password<input required minLength={6} value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></label>
+    </div>
+    <AccountFields form={form} setForm={setForm}/>
+    {err && <div className="error">{err}</div>}
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Creating…':'Create account'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Resources: links and photos (e.g. the AUP calendar) ---------------- */
+function Resources({profile}){
+  const [rows,setRows]=useState([]); const [open,setOpen]=useState(false); const [view,setView]=useState(null)
+  const can=isAdminLike(profile.role)||['head_media','head_colorist'].includes(profile.role)
+  async function load(){ const {data}=await supabase.from('resources').select('*').order('created_at',{ascending:false}); setRows(data||[]) }
+  useEffect(()=>{ load() },[profile.id])
+  async function del(r){
+    if(!await confirmDialog({title:'Remove this resource?',body:r.image_url?'The photo will be deleted too.':undefined,confirmLabel:'Remove',danger:true})) return
+    if(r.image_url){ const path=r.image_url.split('/resources/')[1]; if(path) await supabase.storage.from('resources').remove([decodeURIComponent(path)]) }
+    await supabase.from('resources').delete().eq('id',r.id); load()
+  }
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">QUICK ACCESS</div><h1>Resources</h1><p>Photos, Canva, Drive and other team links — one tap away.</p></div>{can && <button className="primary-btn" onClick={()=>setOpen(true)}><Plus size={17}/> Add resource</button>}</section>
+    <div className="resource-grid">{rows.map(r=>{ const photo=!!r.image_url
+      const openIt=()=>{ if(photo) setView(r); else if(r.url) window.open(r.url,'_blank','noopener,noreferrer') }
+      return <div className="resource-card panel row" key={r.id} role="link" tabIndex={0} onClick={openIt} onKeyDown={e=>{ if(e.key==='Enter') openIt() }}>
+        <div className={`resource-thumb ${photo?'':'icon'}`}>{photo?<img src={r.image_url} alt="" loading="lazy"/>:<Link2 size={22}/>}</div>
+        <div className="resource-text"><h3>{r.name}</h3><p>{r.description||(photo?'Photo':r.resource_type)}{photo&&r.url?' • has link':''}</p>{can && (r.audience||[]).length>0 && <span className="aud-badge">{audLabel(r.audience)}</span>}</div>
+        <div className="resource-actions">
+          {!photo && <ExternalLink size={16} className="res-open"/>}
+          {can && <button type="button" className="icon-btn" onClick={e=>{ e.stopPropagation(); del(r) }} title="Remove">{photo?<Trash2 size={14}/>:<X size={15}/>}</button>}
+        </div>
+      </div> })}</div>
+    {!rows.length && <div className="panel empty">No resources yet.{can?' Add a photo or a link above.':''}</div>}
+    {view && <Modal title={view.name} onClose={()=>setView(null)}>
+      <img className="resource-full" src={view.image_url} alt={view.name}/>
+      {view.description && <p style={{color:'var(--text-dim)',fontSize:12,margin:'10px 0 0'}}>{view.description}</p>}
+      <div className="modal-actions" style={{marginTop:14}}>
+        {view.url && <a className="secondary-btn" href={view.url} target="_blank" rel="noreferrer"><ExternalLink size={14}/> Open link</a>}
+        <a className="primary-btn" href={view.image_url} target="_blank" rel="noreferrer"><Download size={14}/> Open full size</a>
+      </div>
+    </Modal>}
+    {open && <ResourceModal profile={profile} onClose={()=>setOpen(false)} onSaved={load}/>}
+  </div>
+}
+const AUD_GROUPS=[['edbo','EDBO'],['heads','Heads'],['media','Media'],['colorist','Colorist']]
+function audLabel(a){ if(!a||!a.length) return 'Everyone'; const g=a.filter(x=>!x.startsWith('u:')).map(x=>(AUD_GROUPS.find(([k])=>k===x)||[])[1]).filter(Boolean); const n=a.filter(x=>x.startsWith('u:')).length; return [...g,...(n?[`${n} ${n===1?'person':'people'}`]:[])].join(' · ') }
+// Who can see a resource: everyone (default), whole groups, or hand-picked people.
+function AudiencePicker({value,onChange}){
+  const [people,setPeople]=useState([]); const [showPeople,setShowPeople]=useState(value.some(v=>v.startsWith('u:')))
+  useEffect(()=>{ fetchActive().then(setPeople) },[])
+  const toggle=t=>onChange(value.includes(t)?value.filter(x=>x!==t):[...value,t])
+  const ids=value.filter(v=>v.startsWith('u:')).map(v=>v.slice(2))
+  const groups=['EDBO','Media','Colorist'].map(g=>({label:g,people:people.filter(p=>groupOf(p.role)===g||(g==='EDBO'&&groupOf(p.role)==='Admin')).sort(dirSort)}))
+  return <div className="aud-picker">
+    <div className="aud-row">
+      <button type="button" className={`token ${value.length===0&&!showPeople?'active':''}`} onClick={()=>{ onChange([]); setShowPeople(false) }}>Everyone</button>
+      {AUD_GROUPS.map(([k,l])=><button type="button" key={k} className={`token ${value.includes(k)?'active':''}`} onClick={()=>toggle(k)}>{l}</button>)}
+      <button type="button" className={`token ${showPeople||ids.length?'active':''}`} onClick={()=>setShowPeople(v=>!v)}>Specific people{ids.length?` (${ids.length})`:''}</button>
+    </div>
+    <div className={`aud-people ${showPeople?'open':''}`}><div><PersonPicker multi groups={groups} value={ids} onChange={n=>onChange([...value.filter(x=>!x.startsWith('u:')),...n.map(i=>'u:'+i)])}/></div></div>
+    <div className="duty-legend">{value.length?`Only ${audLabel(value)} will see this.`:'Everyone with an account will see this.'}</div>
+  </div>
+}
+function ResourceModal({profile,onClose,onSaved}){
+  const [aud,setAud]=useState([])
+  const [form,setForm]=useState({name:'',description:'',url:'',resource_type:'Photo'})
+  const [file,setFile]=useState(null); const [preview,setPreview]=useState('')
+  const [busy,setBusy]=useState(false)
+  function pick(f){ setFile(f||null); setPreview(f?URL.createObjectURL(f):'') }
+  async function save(e){ e.preventDefault()
+    if(!file && !form.url){ notifyDialog('Add a photo, a link, or both.'); return }
+    if(file && file.size>5*1024*1024){ notifyDialog('The photo is bigger than 5 MB. Please use a smaller one.'); return }
+    setBusy(true)
+    let image_url=null
+    if(file){
+      const ext=((file.name.split('.').pop()||'jpg').toLowerCase().replace(/[^a-z0-9]/g,''))||'jpg'
+      const path=`${crypto.randomUUID()}.${ext}`
+      const {error:ue}=await supabase.storage.from('resources').upload(path,file,{contentType:file.type||'image/jpeg',cacheControl:'3600'})
+      if(ue){ notifyDialog('Upload failed: '+ue.message); setBusy(false); return }
+      image_url=supabase.storage.from('resources').getPublicUrl(path).data.publicUrl
+    }
+    const {error}=await supabase.from('resources').insert({name:form.name,description:form.description||null,url:form.url||null,image_url,resource_type:file?'Photo':form.resource_type,created_by:profile.id,...(aud.length?{audience:aud}:{})})
+    setBusy(false); if(error) notifyDialog(error.message); else { onClose(); onSaved() }
+  }
+  return <Modal title="Add resource" onClose={onClose}><form onSubmit={save}>
+    <label>Name<input required placeholder="e.g. AUP Calendar" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label>
+    <label>Photo (optional)<input type="file" accept="image/*" onChange={e=>pick(e.target.files?.[0])}/></label>
+    {preview && <img className="resource-preview" src={preview} alt="Preview"/>}
+    <label>Link (optional)<input type="url" placeholder="https://… Canva, Drive…" value={form.url} onChange={e=>setForm({...form,url:e.target.value})}/></label>
+    <label>Note<input value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label>
+    <label>Who can see this?</label>
+    <AudiencePicker value={aud} onChange={setAud}/>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Uploading…':'Add'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Settings (admin only) ---------------- */
+function Settings({profile}){
+  const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null); const [reset,setReset]=useState(null); const [filter,setFilter]=useState(''); const [search,setSearch]=useState('')
+  useEffect(()=>{ load() },[])
+  async function load(){ setRows((await fetchProfiles()).sort(dirSort)) }
+  const q=search.trim().toLowerCase()
+  const filtered=rows.filter(m=>(!filter||groupOf(m.role)===filter)&&(!q||`${m.full_name} ${m.email||''} ${m.position||''}`.toLowerCase().includes(q)))
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">ADMIN ONLY</div><h1>Settings</h1><p>Edit member profiles or reset a password.</p></div></section>
+    <FilterBar search={search} onSearch={setSearch} placeholder="Search name, email or position…" extraActive={!!filter} onClear={()=>setFilter('')}>
+      <label>Section<Select value={filter} onChange={e=>setFilter(e.target.value)} className="filter-select"><option value="">All</option><option>Admin</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>
+    </FilterBar>
+    <div className="panel">{filtered.map(m=><div className="settings-row" key={m.id}>
+      <div className="settings-who">
+        <Avatar cls="avatar" url={m.avatar_url} name={m.full_name}/>
+        <div className="settings-text"><strong>{m.full_name}{m.active===false?' (inactive)':''}</strong><span>{ROLE_META[m.role]?roleLabel(m):'Old role (unused)'}{m.email?` • ${m.email}`:''}</span></div>
+      </div>
+      <div className="settings-actions"><button className="ghost-btn" onClick={()=>setEdit(m)}>Edit</button><button className="ghost-btn" onClick={()=>setReset(m)}><KeyRound size={13}/> Reset password</button></div>
+    </div>)}{!filtered.length && <div className="empty">No members found.</div>}</div>
+    {edit && <EditMemberModal member={edit} onClose={()=>setEdit(null)} onSaved={load}/>}
+    {reset && <ResetPasswordModal member={reset} onClose={()=>setReset(null)}/>}
+  </div>
+}
+async function callManageUser(body){
+  const {data:{session}}=await supabase.auth.getSession()
+  const res=await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-manage-user`,{ method:'POST', headers:{'Content-Type':'application/json',Authorization:`Bearer ${session.access_token}`}, body:JSON.stringify(body) })
+  const json=await res.json().catch(()=>({})); if(!res.ok) throw new Error(json.error||'Something went wrong.'); return json
+}
+function EditMemberModal({member,onClose,onSaved}){
+  const start=groupAndPositionOf(member.role&&ROLE_META[member.role]?member:{role:'staff_media',position:member.position})
+  const [form,setForm]=useState({full_name:member.full_name,group:start.group,position:start.position,active:member.active,avatar_url:member.avatar_url||''})
+  const [busy,setBusy]=useState(false); const [err,setErr]=useState('')
+  async function save(e){ e.preventDefault(); setBusy(true); setErr('')
+    const role=roleFromChoice(form.group)
+    try{ await callManageUser({action:'update_profile',userId:member.id,full_name:form.full_name,avatar_url:form.avatar_url,active:form.active,role,department:deptForRole(form.group),position:form.group==='Admin'?'Admin':form.position}); onClose(); onSaved() } catch(e){ setErr(e.message) }
+    setBusy(false)
+  }
+  return <Modal title={`Edit ${member.full_name}`} onClose={onClose}><form onSubmit={save}>
+    <label>Full name<input required value={form.full_name} onChange={e=>setForm({...form,full_name:e.target.value})}/></label>
+    <label>Profile picture URL<input type="url" placeholder="https://…" value={form.avatar_url} onChange={e=>setForm({...form,avatar_url:e.target.value})}/></label>
+    <AccountFields form={form} setForm={setForm}/>
+    <label style={{display:'flex',flexDirection:'row',alignItems:'center',gap:8}}><input type="checkbox" style={{width:'auto'}} checked={form.active} onChange={e=>setForm({...form,active:e.target.checked})}/> Active member</label>
+    {err && <div className="error">{err}</div>}
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Save changes'}</button></div>
+  </form></Modal>
+}
+function ResetPasswordModal({member,onClose}){
+  const [pw,setPw]=useState(''); const [busy,setBusy]=useState(false); const [err,setErr]=useState(''); const [ok,setOk]=useState(false)
+  async function save(e){ e.preventDefault(); setBusy(true); setErr('')
+    try{ await callManageUser({action:'reset_password',userId:member.id,password:pw}); setOk(true); setTimeout(onClose,1000) } catch(e){ setErr(e.message) }
+    setBusy(false)
+  }
+  return <Modal title={`Reset password — ${member.full_name}`} onClose={onClose}><form onSubmit={save}>
+    <label>New password<input required minLength={6} value={pw} onChange={e=>setPw(e.target.value)}/></label>
+    {err && <div className="error">{err}</div>}{ok && <div className="empty" style={{padding:'6px 0'}}>Password updated.</div>}
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Reset password'}</button></div>
+  </form></Modal>
+}
+
+/* ---------------- Backup ---------------- */
+function Backup({profile}){
+  const role=profile.role; const all=seesAll(role)
+  const showEvents=all||role==='head_media'
+  const fixedGroup=all?'':(role==='head_media'?'Media':'Colorist')
+  const [group,setGroup]=useState(''); const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role); const [tot,setTot]=useState({h1:0,h2:0,unit:'hrs'})
+  const [sheetUrl,setSheetUrl]=useState('')
+  const [people,setPeople]=useState([]); const [events,setEvents]=useState([]); const [loading,setLoading]=useState(true); const [openId,setOpenId]=useState(null)
+  const scope=all?'ALL':profile.department
+  async function load(){
+    const {data:intg}=await supabase.from('integrations').select('*').eq('scope',scope).maybeSingle(); setSheetUrl(intg?.sheet_webhook_url||'')
+    const profiles=await fetchProfiles()   // includes deactivated people, so their hours stay readable
+    const {data:tasks0}=await supabase.from('tasks').select('id,assigned_to,title,assigned_date,completed_at,status,semester,department,schedule_id')
+    const {data:scheds0}=await supabase.from('schedules').select('id,title,start_at,end_at,status,sorted_at,semester,legacy_media,legacy_colorist,schedule_members(member_id,duties)').eq('department','Media').order('start_at',{ascending:false})
+    const tasks=(tasks0||[]).filter(t=>inSem(t,sem)); const scheds=(scheds0||[]).filter(s=>inSem(s,sem))
+    const hrsIn=(list,k,id)=>list.filter(s=>inSem(s,k)&&(!id||(s.schedule_members||[]).some(m=>m.member_id===id))).reduce((a,s)=>a+Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000),0)
+    if(showEvents) setTot({h1:hrsIn(scheds0||[],'1'),h2:hrsIn(scheds0||[],'2'),unit:'hrs'})
+    else { const done=k=>(tasks0||[]).filter(t=>inSem(t,k)&&t.status==='completed'&&(profiles||[]).some(p=>p.id===t.assigned_to&&groupOf(p.role)==='Colorist'&&isStaff(p.role))).length; setTot({h1:done('1'),h2:done('2'),unit:'tasks'}) }
+    const nameOf=id=>(profiles||[]).find(p=>p.id===id)?.full_name||''
+    const hrsOf=s=>Math.max(0,(new Date(s.end_at)-new Date(s.start_at))/3600000)
+    const list=(profiles||[]).filter(p=>ROLE_META[p.role]&&p.role!=='admin'&&(!fixedGroup||groupOf(p.role)===fixedGroup)&&(!fixedGroup||isStaff(p.role))).map(p=>{
+      const mineE=(scheds||[]).filter(s=>(s.schedule_members||[]).some(m=>m.member_id===p.id))
+      const mineT=(tasks||[]).filter(t=>t.assigned_to===p.id)
+      const rows=[
+        ...mineE.map(s=>{ const d=(s.schedule_members.find(m=>m.member_id===p.id)?.duties||[]); return {iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Duty:d.join('/'),Range:`${fmtTime(s.start_at)} → ${fmtTime(s.end_at)}`,Value:`${hrsOf(s).toFixed(1)} h`} }),
+        ...mineT.map(t=>({iso:t.assigned_date||'',Date:fmtDay(t.assigned_date),Event:t.title,Duty:'',Range:`${fmtDay(t.assigned_date,false)} → ${t.completed_at?fmtDay(t.completed_at,false):'not done yet'}`,Value:t.status.replace('_',' ')}))
+      ].sort((a,b)=>String(a.iso).localeCompare(String(b.iso)))
+      return { id:p.id, Avatar:p.avatar_url, Name:p.full_name, Position:p.position||roleLabel(p), Section:groupOf(p.role), Hours:mineE.reduce((a,s)=>a+hrsOf(s),0), H1:hrsIn(scheds0||[],'1',p.id), H2:hrsIn(scheds0||[],'2',p.id), Inactive:p.active===false, AllTasks:(tasks0||[]).filter(t=>t.assigned_to===p.id).length, Events:mineE.length, TasksDone:mineT.filter(t=>t.status==='completed').length, Tasks:mineT.length, rows }
+    }).filter(x=>!x.Inactive||x.H1+x.H2>0||x.AllTasks>0).sort((a,b)=>(a.Inactive-b.Inactive)||a.Name.localeCompare(b.Name))
+    setPeople(list)
+    setEvents((scheds||[]).map(s=>({id:s.id,iso:localISO(s.start_at),Date:fmtDay(s.start_at),Event:s.title,Medias:[...(s.schedule_members||[]).map(m=>`${nameOf(m.member_id)}${(m.duties||[]).length?` (${m.duties.join('/')})`:''}`),...(s.legacy_media?[s.legacy_media]:[])].filter(Boolean).join(', '),Colorist:[...tasks.filter(t=>t.schedule_id===s.id&&t.department==='Colorist').map(t=>nameOf(t.assigned_to)),...(s.legacy_colorist?[s.legacy_colorist]:[])].filter(Boolean).join(', '),Hours:hrsOf(s).toFixed(1)})))
+    setLoading(false)
+  }
+  useEffect(()=>{ load() },[profile.id,sem]); usePoll(load,60000)
+  const q=search.trim().toLowerCase()
+  const shownPeople=people.filter(p=>(!group||p.Section===group)&&(!q||`${p.Name} ${p.Position}`.toLowerCase().includes(q))&&(!dateFilter||p.rows.some(r=>r.iso===dateFilter)))
+  const shownEvents=events.filter(e=>(!dateFilter||e.iso===dateFilter)&&(!q||`${e.Event} ${e.Medias} ${e.Colorist}`.toLowerCase().includes(q)))
+  const summaryCSV=shownPeople.map(p=>({Name:p.Name,Position:p.Position,Section:p.Section,'1st Sem Hours':p.H1.toFixed(1),'2nd Sem Hours':p.H2.toFixed(1),'Total Hours':(p.H1+p.H2).toFixed(1),Events:p.Events,'Tasks Done':p.TasksDone,Tasks:p.Tasks}))
+  const detailCSV=shownPeople.flatMap(p=>p.rows.filter(r=>!dateFilter||r.iso===dateFilter).map(r=>({Date:r.Date,'Event / Task':r.Event,Name:p.Name,Position:p.Position+(r.Duty?` (${r.Duty})`:''),'From → To':r.Range,'Hours / Status':r.Value})))
+  const eventsCSV=shownEvents.map(e=>({'Event Date':e.Date,'Event Name':e.Event,Medias:e.Medias,Colorist:e.Colorist,Hours:e.Hours}))
+  return <div>
+    <section className="page-head"><div><div className="eyebrow">BACKUP</div><h1>{all?'Main spreadsheet backup':`${profile.department} backup`}</h1><p>Everyone is listed by name — tap a name to see all of their events and tasks. The switch filters the lists; the box always shows both semesters.</p></div><SemSwitch value={sem} onChange={setSem}/></section>
+    <SemSummary h1={tot.h1} h2={tot.h2} unit={tot.unit} label={tot.unit==='hrs'?'Total hours':'Colorgrading done'}/>
+    <div className="panel task-panel" style={{marginBottom:14,display:'flex',justifyContent:'space-between',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+      <div><h2 style={{margin:0,fontFamily:'"Playfair Display"',fontSize:19}}>Google Sheet</h2><p style={{margin:'4px 0 0',fontSize:12,color:'var(--text-dim)'}}>The sheet updates by itself — tap the button to open it.</p></div>
+      <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+        {sheetUrl && <a className="primary-btn" href={sheetUrl} target="_blank" rel="noreferrer"><ExternalLink size={15}/> Check Google Sheet</a>}
+      </div>
+    </div>
+    <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Name, event or media…" extraActive={!!group} onClear={()=>setGroup('')}>
+      {all && <label>Section<Select className="filter-select" value={group} onChange={e=>setGroup(e.target.value)}><option value="">All</option><option>EDBO</option><option>Media</option><option>Colorist</option></Select></label>}
+    </FilterBar>
+    <div className="panel table-panel" style={{marginBottom:14}}>
+      <div className="panel-title" style={{padding:'21px 21px 12px'}}><h2>People</h2><div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{shownPeople.length} people</span><button className="text-btn" onClick={()=>downloadCSV('backup-summary.csv',summaryCSV)}><Download size={13}/> Summary CSV</button><button className="text-btn" onClick={()=>downloadCSV('backup-detail.csv',detailCSV)}><Download size={13}/> Detail CSV</button></div></div>
+      {loading ? <div className="empty">Loading…</div> : shownPeople.map(p=>{ const open=openId===p.id; const rows=p.rows.filter(r=>!dateFilter||r.iso===dateFilter)
+        return <div key={p.id} className={`person-acc ${open?'open':''}`}>
+          <button type="button" className="person-head" onClick={()=>setOpenId(open?null:p.id)}>
+            <ChevronRight size={16} className="person-chev"/><Avatar cls="avatar sm" url={p.Avatar} name={p.Name}/><strong>{p.Name}</strong>{p.Inactive && <span className="inactive-tag">inactive</span>}
+            <span className="person-meta">{p.Position} • {p.Section}</span>
+            <span className="person-split">
+              {(p.H1+p.H2)>0 && <><span className="sp"><small>1st</small><b><CountUp value={p.H1.toFixed(1)}/></b></span><span className="sp"><small>2nd</small><b><CountUp value={p.H2.toFixed(1)}/></b></span><span className="sp"><small>total</small><b><CountUp value={(p.H1+p.H2).toFixed(1)}/></b></span></>}
+              {p.Tasks>0 && <span className="sp"><b><CountUp value={p.TasksDone}/></b><small>tasks done</small></span>}
+              {!(p.H1+p.H2)&&!p.Tasks && <small>nothing yet</small>}</span>
+          </button>
+          {open && <div className="person-body">
+            {rows.length?<div className="person-rows">{rows.map((d,i)=><div className="person-row" key={i}><b>{d.Date}</b><span>{d.Event}{d.Duty && <em className="duty-tag">{d.Duty}</em>}</span><span>{d.Range}</span><span>{d.Value}</span></div>)}</div>:<div className="empty" style={{padding:'14px 0'}}>Nothing logged yet.</div>}
+          </div>}
+        </div> })}
+      {!loading && !shownPeople.length && <div className="empty">No one found.</div>}
+    </div>
+    {showEvents && <div className="panel table-panel">
+      <div className="panel-title" style={{padding:'21px 21px 12px'}}><h2>Events</h2><div style={{display:'flex',alignItems:'center',gap:12}}><span style={{fontSize:11,color:'var(--text-dim)'}}>{shownEvents.length} events</span><button className="text-btn" onClick={()=>downloadCSV('backup-events.csv',eventsCSV)}><Download size={13}/> Events CSV</button></div></div>
+      <div className="table-head trk-bk"><span>Event date</span><span>Event name</span><span>Medias</span><span>Hours</span></div>
+      {shownEvents.map(e=><div className="table-row trk-bk" key={e.id}><span data-label="Event date">{e.Date}</span><strong className="row-title">{e.Event}</strong><span data-label="Medias">{e.Medias||'—'}{e.Colorist && <small className="sub">Colorist: {e.Colorist}</small>}</span><span data-label="Hours">{e.Hours} h</span></div>)}
+      {!loading && !shownEvents.length && <div className="empty">No events found.</div>}
+    </div>}
+  </div>
+}
