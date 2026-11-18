@@ -539,6 +539,7 @@ function Workspace({profile,onProfileRefresh,theme,toggleTheme}){
         </div>
       </header>
       <AnnouncementTicker profile={profile}/>
+      <NotificationTicker profile={profile} onOpen={()=>goPage('Notifications')}/>
       <div className={`content page-enter ${dir}`} key={page+String(deptFocus)}>
         {page==='Dashboard' && viewAll && <AdminDashboard profile={profile}/>}
         {page==='Dashboard' && !viewAll && mode==='hours' && <HoursDashboard profile={profile}/>}
@@ -666,6 +667,27 @@ function AnnouncementTicker({profile}){
   </div>
   {open && <Modal title="Announcements" onClose={()=>setOpen(false)}><div className="ann-list">{items.map(a=><div className="ann-item" key={a.id}><strong>{a.title}</strong>{a.body && <p>{a.body}</p>}<small>{new Date(a.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small></div>)}</div></Modal>}
   </>
+}
+// Same running banner for unread notifications (tasks, events, etc.). Tap = open Notifications, X = hide until a newer one arrives.
+function NotificationTicker({profile,onOpen}){
+  const [items,setItems]=useState([]); const [hidden,setHidden]=useState(()=>{ try{ return sessionStorage.getItem('sm-nticker-x')||'' }catch{ return '' } }); const [closing,setClosing]=useState(false)
+  async function load(){
+    const {data}=await supabase.from('notifications').select('id,title,body,kind,created_at').eq('user_id',profile.id).eq('read',false).neq('kind','announcement').order('created_at',{ascending:false}).limit(5)
+    setItems(data||[])
+  }
+  useEffect(()=>{ load() },[profile.id]); usePoll(load,30000)  // eslint-disable-line
+  const latest=items[0]?.id||''
+  if(!items.length || hidden===latest) return null
+  const clip=t=>t&&t.length>120?t.slice(0,117)+'…':t
+  const line=items.map(a=>`${a.title}${a.body?` — ${clip(a.body)}`:''}`)
+  const chars=line.join('').length
+  function close(e){ e.stopPropagation(); setClosing(true); setTimeout(()=>{ try{ sessionStorage.setItem('sm-nticker-x',latest) }catch{}; setHidden(latest) },420) }
+  const Track=({aria})=><span className="ticker-set" aria-hidden={aria}>{line.map((t,i)=><span className="ticker-item" key={i}>{t}<i className="ticker-dot"/></span>)}</span>
+  return <div className={`ticker noti ${closing?'closing':''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={e=>{ if(e.key==='Enter') onOpen() }} title="Open notifications">
+    <span className="ticker-tag"><Bell size={13}/> <b>Notification{items.length>1?`s · ${items.length}`:''}</b></span>
+    <div className="ticker-view"><div className="ticker-track" style={{'--dur':`${Math.max(20,Math.round(chars*0.24))}s`}}><Track/><Track aria={true}/></div></div>
+    <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
+  </div>
 }
 function NotificationsPage({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
@@ -911,7 +933,7 @@ function EventDetailModal({id,profile,onClose}){
       {s.description && <p className="detail-desc">{s.description}</p>}
       {s.legacy_media && <p className="detail-desc">Media: {s.legacy_media}</p>}
       {s.legacy_colorist && <p className="detail-desc">Colorist: {s.legacy_colorist}</p>}
-      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>THE CREW</div>
+      {(s.schedule_members||[]).length>0 && <><div className="eyebrow" style={{margin:'14px 0 8px'}}>MEDIAS</div>
         <div className="crew-list">{s.schedule_members.map(m=><div className={`crew-person ${m.member_id===profile.id?'me':''}`} key={m.member_id}><Avatar cls="avatar sm" url={m.profiles?.avatar_url} name={m.profiles?.full_name||'?'}/><span>{m.profiles?.full_name}{m.member_id===profile.id?' (you)':''}</span>{(m.duties||[]).length>0 && <em className="duty-tag">{m.duties.join('/')}</em>}{needsSort(m) && s.status!=='completed' && <small className={m.sorted?'ok':''}>{m.sorted?'sorted ✓':'pending'}</small>}</div>)}</div></>}
       <DutyGrab sched={s} profile={profile} onChanged={load}/>
     </div>}
@@ -950,7 +972,7 @@ function Select({value,onChange,children,className='',disabled,style}){
   const opts=[]; Children.forEach(children,c=>{ if(c&&c.props){ const label=Array.isArray(c.props.children)?c.props.children.join(''):String(c.props.children??''); opts.push({value:c.props.value!==undefined?c.props.value:label,label}) } })
   const cur=opts.find(o=>o.value===value)||opts[0]
   function toggle(){ if(disabled) return; if(!open){ const r=btn.current.getBoundingClientRect(); const below=window.innerHeight-r.bottom-12; const up=below<190&&r.top>below; setPos({left:r.left,width:r.width,...(up?{bottom:window.innerHeight-r.top+6,maxHeight:Math.min(280,r.top-12)}:{top:r.bottom+6,maxHeight:Math.min(280,below)})}) } setOpen(!open) }
-  useEffect(()=>{ if(!open) return; const close=e=>{ if(e.type==='keydown'){ if(e.key==='Escape') setOpen(false); return } if(!e.target.closest?.('.sel-list')&&!btn.current?.contains(e.target)) setOpen(false) }; const off=()=>setOpen(false)
+  useEffect(()=>{ if(!open) return; const close=e=>{ if(e.type==='keydown'){ if(e.key==='Escape') setOpen(false); return } if(!e.target.closest?.('.sel-list')&&!btn.current?.contains(e.target)) setOpen(false) }; const off=e=>{ if(e&&e.type==='scroll'&&e.target&&e.target.closest&&e.target.closest('.sel-list')) return; setOpen(false) }
     document.addEventListener('mousedown',close); document.addEventListener('keydown',close); window.addEventListener('resize',off); window.addEventListener('scroll',off,true)
     return ()=>{ document.removeEventListener('mousedown',close); document.removeEventListener('keydown',close); window.removeEventListener('resize',off); window.removeEventListener('scroll',off,true) } },[open])
   return <div className={`sel ${className.replace('filter-select','').trim()} ${open?'open':''}`} style={style}>
@@ -1187,7 +1209,7 @@ function HoursDashboard({profile}){
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>{new Date(next.start_at).toLocaleDateString([], {weekday:'long',month:'long',day:'numeric'})} • {fmtTime(next.start_at)}–{fmtTime(next.end_at)} ({Math.max(0,(new Date(next.end_at)-new Date(next.start_at))/3600000).toFixed(1)}h)</p>
       <p style={{margin:'0 0 4px',color:'var(--text-dim)',fontSize:12}}>Where: {next.location||'No location set'}</p>
       {next.description && <p style={{margin:'0 0 8px',color:'var(--text-dim)',fontSize:12}}>{next.description}</p>}
-      <div className="eyebrow" style={{margin:'10px 0 6px'}}>THE CREW</div>
+      <div className="eyebrow" style={{margin:'10px 0 6px'}}>MEDIAS</div>
       <div className="member-chips" style={{justifyContent:'flex-start'}}>{(next.schedule_members||[]).map(m=><span key={m.member_id} className={m.member_id===profile.id?'me':''}>{crewText(m)}{m.sorted?' ✓':''}{m.member_id===profile.id?' (you)':''}</span>)}</div>
     </div>}
     <div className="panel task-panel">
@@ -1531,7 +1553,6 @@ function SlotsPicker({value,onChange}){
   return <div className="slots-picker">
     <div className="slots-grid">{DUTIES.map(([d,t])=><div key={d} className="slot-step"><span className="ss-name"><b>{d}</b><small>{t}</small></span>
       <div className="stepper"><button type="button" onClick={()=>set(d,-1)} aria-label={`Fewer ${d}`}>−</button><em>{Number(value[d])||0}</em><button type="button" onClick={()=>set(d,1)} aria-label={`More ${d}`}>+</button></div></div>)}</div>
-    <div className="duty-legend">Spots members can grab on their own. Leave everything at 0 if you only want to assign people yourself — you can do both.</div>
   </div>
 }
 function useEventPeople(){
@@ -1614,7 +1635,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
 
 /* ---------------- Tracker (Head Media / Media: sorted events ledger) ---------------- */
 function Tracker({profile}){
-  const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null)
+  const [rows,setRows]=useState([]); const [edit,setEdit]=useState(null); const [addPast,setAddPast]=useState(false)
   const [search,setSearch]=useState(''); const [dateFilter,setDateFilter]=useState(''); const [sem,setSem]=useSem(profile.role)
   const can=canCreateSchedule(profile.role); const staff=isStaff(profile.role)
   async function load(){
@@ -1628,7 +1649,7 @@ function Tracker({profile}){
   const q=search.trim().toLowerCase()
   const shown=rows.filter(r=>inSem(r,sem)&&(!dateFilter||localISO(r.start_at)===dateFilter||(r.sorted_at&&localISO(r.sorted_at)===dateFilter))&&(!q||`${r.title} ${mediaNames(r)}`.toLowerCase().includes(q)))
   return <div>
-    <section className="page-head"><div><div className="eyebrow">FULL LEDGER</div><h1>Tracker</h1><p>Sorted events, who covered them, and when they were sorted.</p></div><SemSwitch value={sem} onChange={setSem}/></section>
+    <section className="page-head"><div><div className="eyebrow">FULL LEDGER</div><h1>Tracker</h1><p>Sorted events, who covered them, and when they were sorted.</p></div><div className="head-actions">{can && <button className="primary-btn" onClick={()=>setAddPast(true)}><Plus size={17}/> Add past event</button>}<SemSwitch value={sem} onChange={setSem}/></div></section>
     <FilterBar search={search} onSearch={setSearch} date={dateFilter} onDate={setDateFilter} placeholder="Event or media…"/>
     <div className="panel table-panel">
       <div className={`table-head trk-media ${can?'':'no-action'}`}><span>Event date</span><span>Event name</span><span>Medias</span><span>Sorted on</span><span>Status</span>{can && <span>Action</span>}</div>
@@ -1642,7 +1663,44 @@ function Tracker({profile}){
       {!shown.length && <div className="empty">Nothing sorted yet.</div>}
     </div>
     {edit && <EditScheduleModal schedule={edit} onClose={()=>setEdit(null)} onSaved={load}/>}
+    {addPast && <AddPastEventModal onClose={()=>setAddPast(false)} onSaved={load}/>}
   </div>
+}
+
+// Add an event that was missed: already sorted, hours from start/end, crew without PM/PC/VM/VC. Edit the row afterwards to fix hours.
+function AddPastEventModal({onClose,onSaved}){
+  const sp=useContext(SettingsCtx).semPeriod
+  const [form,setForm]=useState({title:'',date:todayISO(),start:'',end:'',sortedOn:'',crew:[]})
+  const people=useEventPeople(); const [busy,setBusy]=useState(false)
+  async function save(e){ e.preventDefault()
+    if(form.end<form.start){ notifyDialog('End time must be after the start time.'); return }
+    setBusy(true)
+    const start=new Date(`${form.date}T${form.start}`).toISOString(), end=new Date(`${form.date}T${form.end}`).toISOString()
+    const sorted=new Date(`${form.sortedOn||form.date}T12:00`).toISOString()
+    const {error}=await supabase.rpc('add_past_event',{p_title:form.title,p_start:start,p_end:end,p_sorted_at:sorted,p_members:form.crew,p_semester:semFor(form.date,sp)||null})
+    setBusy(false)
+    if(error){ notifyDialog(error.message.includes('add_past_event')?'Run supabase/past-event.sql in the Supabase SQL editor first.':error.message); return }
+    onClose(); onSaved()
+  }
+  const hrs=form.start&&form.end&&form.end>=form.start?((new Date(`2000-01-01T${form.end}`)-new Date(`2000-01-01T${form.start}`))/3600000).toFixed(1):null
+  return <Modal title="Add past event" onClose={onClose}><form onSubmit={save}>
+    <p className="cc-note" style={{marginTop:0}}>For an event that was missed. It is added as already sorted, and the hours count for everyone you pick.</p>
+    <label>Event name<input required value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/></label>
+    <label>Event date<DateField required value={form.date} onChange={v=>setForm({...form,date:v})}/></label>
+    <div className="form-row">
+      <label>Start time<TimeField required value={form.start} onChange={v=>setForm({...form,start:v})}/></label>
+      <label>End time<TimeField required value={form.end} onChange={v=>setForm({...form,end:v})}/></label>
+    </div>
+    {hrs && <p className="cc-note" style={{margin:'0 0 8px'}}>{hrs} hours</p>}
+    <label>Sorted on (optional)<DateField value={form.sortedOn} onChange={v=>setForm({...form,sortedOn:v})}/></label>
+    <label>Who covered it</label>
+    <PersonPicker groups={[
+      {label:'MEDIA',people:people.filter(p=>p.role==='staff_media')},
+      {label:'COLORIST',people:people.filter(p=>p.role==='staff_colorist')},
+      {label:'EDBO',people:people.filter(p=>EVENT_BOARD.includes(p.role))},
+    ]} value={form.crew} multi={true} onChange={ids=>setForm({...form,crew:ids})}/>
+    <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Adding…':'Add event'}</button></div>
+  </form></Modal>
 }
 
 /* ---------------- Announcements (admin only) ---------------- */
