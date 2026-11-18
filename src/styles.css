@@ -959,3 +959,5 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 /* Round 27: tracker head actions */
 .head-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 @media(max-width:760px){.head-actions{width:100%}.head-actions .primary-btn{flex:1;justify-content:center}}
+.push-box{display:flex;flex-direction:column;align-items:flex-end;gap:6px;max-width:320px}.push-note{color:var(--text-dim);font-size:11px;line-height:1.45;text-align:right}
+@media(max-width:760px){.push-box{width:100%;align-items:stretch}.push-box .primary-btn,.push-box .secondary-btn{justify-content:center}.push-note{text-align:left}}
