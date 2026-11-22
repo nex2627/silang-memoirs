@@ -1010,3 +1010,9 @@ html.modal-open .privacy-fab,html.modal-open .priv-teaser{display:none}
   .priv-panel{left:10px;right:10px;width:auto;bottom:max(10px,env(safe-area-inset-bottom));max-height:calc(100dvh - 24px - env(safe-area-inset-top))}
 }
 @media(prefers-reduced-motion:reduce){.priv-panel,.priv-teaser,.priv-back,.priv-body{animation:none}}
+
+/* Round 31: fixed-height privacy panel + steady calendar month arrows */
+.priv-panel{height:min(400px,calc(100dvh - 32px));max-height:none}
+@media(max-width:760px){.priv-panel{height:min(400px,calc(100dvh - 24px - env(safe-area-inset-top)));max-height:none}}
+.priv-body{flex:1;min-height:0}
+.cal-toolbar strong{display:inline-block;width:9.6em;text-align:center;white-space:nowrap;flex:none}
