@@ -1016,3 +1016,22 @@ html.modal-open .privacy-fab,html.modal-open .priv-teaser{display:none}
 @media(max-width:760px){.priv-panel{height:min(400px,calc(100dvh - 24px - env(safe-area-inset-top)));max-height:none}}
 .priv-body{flex:1;min-height:0}
 .cal-toolbar strong{display:inline-block;width:9.6em;text-align:center;white-space:nowrap;flex:none}
+
+/* Round 32: compact privacy panel, popups keep the top bar, notify tick */
+.priv-panel{width:min(330px,calc(100vw - 32px));height:250px;max-height:none;padding:10px 14px 12px;border-radius:18px}
+@media(max-width:760px){.priv-panel{height:250px;max-height:none;left:auto;right:max(12px,env(safe-area-inset-right));width:min(330px,calc(100vw - 24px));bottom:max(12px,env(safe-area-inset-bottom))}
+  body:has(.mobile-tabbar) .priv-panel{bottom:calc(64px + env(safe-area-inset-bottom) + 12px)}}
+.priv-head{display:flex;align-items:center;gap:8px;margin:0 0 10px}
+.priv-head strong{display:grid;place-items:center;width:30px;height:30px;flex:none;font-size:0}
+.priv-head strong svg{color:var(--sand)}
+.priv-tabs{display:flex;flex:1;margin:0;overflow:hidden}
+.priv-tabs button{flex:1;justify-content:center;padding:6px 10px}
+.priv-body{font-size:12.5px;line-height:1.55}
+.priv-body p{margin:0 0 8px}
+.priv-credit{margin-bottom:8px;padding:10px 12px}.priv-credit strong{font-size:14px}
+
+/* the dashboard top bar stays visible above popups (desktop too) */
+.modal-backdrop{top:var(--tb,0px)}
+@media(min-width:761px){.modal{max-height:calc(100dvh - var(--tb,0px) - 56px)}}
+.notify-row{margin:4px 0 8px;padding:10px 12px;border-radius:12px;background:var(--surface-2);font-size:13px;font-weight:600}
+.notify-row input{width:18px;height:18px;accent-color:var(--ink)}
