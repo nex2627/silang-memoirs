@@ -5,7 +5,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, Clock3, Users, Link2, LogOut, Search, Plus, X,
   Camera, CheckCircle2, Sparkles, ExternalLink, ChevronRight,
   ChevronLeft, ChevronDown, ClipboardCheck, Database, Sun, Moon, Bell, Eye, EyeOff, Settings as SettingsIcon,
-  Download, Copy, SlidersHorizontal, Activity as ActivityIcon, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History
+  Download, Copy, SlidersHorizontal, Activity as ActivityIcon, Check, Wand2, KeyRound, FolderKanban, Megaphone, Trash2, BellOff, Pencil, History, ShieldCheck
 
 } from 'lucide-react'
 
@@ -266,7 +266,7 @@ function InstallModal({onClose}){
 }
 
 /* ---------------- Root ---------------- */
-export default function App(){
+function AppInner(){
   const [session,setSession]=useState(undefined)
   const [profile,setProfile]=useState(null)
   const [theme,toggleTheme]=useTheme()
@@ -316,6 +316,82 @@ function RetiredScreen({profile,theme,toggleTheme}){
     <p>{profile.active===false?'This account has been deactivated.':'This account’s position is no longer used in the system.'} Please ask the Admin to update it.</p>
     <button className="primary-btn wide" style={{marginTop:22}} onClick={()=>supabase.auth.signOut()}>Log out</button></div></div>
 }
+
+
+/* ---------------- Privacy · Terms · Copyright · Credits ---------------- */
+const PRIVACY_TABS=[['privacy','Privacy'],['terms','Terms'],['copyright','Copyright'],['credits','Credits']]
+function PrivacyBody({tab}){
+  if(tab==='privacy') return <>
+    <h4>Privacy Notice</h4>
+    <p>SilangMemoirs is the internal workspace of the <b>Silang Memoirs · Nexemeral 27</b> Media team. Everything stored here is used for two purposes only: <b>scheduling Media coverage</b> and <b>checking and recording members’ hours</b> (with the tasks and backups that go with them).</p>
+    <h5>What we keep</h5>
+    <p>Your name, school ID / email, position, optional profile photo, event and duty assignments, hours, tasks, notifications, and — only if you turn on alerts — a token for the device you chose.</p>
+    <h5>Internal use only</h5>
+    <p>Your information stays inside the team. It is never sold, shared, advertised with or published, and it does not leave the Silang Memoirs team.</p>
+    <h5>Who can see what</h5>
+    <p>Access follows your role. Members see their own schedule and hours; heads and officers see the team records they need to run the work; the administrator maintains the system.</p>
+    <h5>Where it is stored</h5>
+    <p>Only on the services that run this site: Supabase (database and login), GitHub Pages (website hosting), Google Sheets (backup copies kept by the team) and your browser’s push service (alerts you opt into). They act as infrastructure only.</p>
+    <h5>Safeguards</h5>
+    <p>Sign-in is required, access is role-based, passwords are stored hashed by the login provider, and idle sessions are signed out automatically. The site stores only your login session and display preferences in your browser. It has no advertising and no third-party tracking.</p>
+    <h5>Keeping and removing data</h5>
+    <p>Records are kept for the life of the Silang Memoirs project and then archived or deleted. You may ask to view, correct or remove your information at any time through the Technical Director or the EIC.</p>
+    <p className="priv-fine">This notice follows the principles of the Data Privacy Act of 2012 (Republic Act No. 10173). Last updated November 2026.</p>
+  </>
+  if(tab==='terms') return <>
+    <h4>Terms of Use</h4>
+    <p>This workspace is for authorized members of the Silang Memoirs team. By signing in you agree to:</p>
+    <ul>
+      <li>keep your login private and never share your account;</li>
+      <li>enter accurate information, including your hours and task updates;</li>
+      <li>use the records only for official Silang Memoirs work;</li>
+      <li>not copy, export or post other members’ information outside the team;</li>
+      <li>not try to reach data or features meant for another role.</li>
+    </ul>
+    <p>Access may be limited or removed by the administrators if these terms are not followed. Schedules, hours and assignments are team records and may be corrected by the officers in charge.</p>
+  </>
+  if(tab==='copyright') return <>
+    <h4>Copyright</h4>
+    <p>© 2026 <b>Silang Memoirs · Nexemeral 27</b>. All rights reserved.</p>
+    <p>The design, interface and code of this website were created by <b>Vum Sian Mang</b> for the Silang Memoirs team and may not be copied, resold or reused without written permission.</p>
+    <p>Photographs, videos, write-ups and other yearbook content belong to the Silang Memoirs team and their respective creators and subjects. They may not be reproduced or distributed without permission.</p>
+    <p>The Silang Memoirs name and logo belong to the team. Names and marks of third-party services mentioned here belong to their owners.</p>
+  </>
+  return <>
+    <h4>Credits</h4>
+    <div className="priv-credit"><strong>Vum Sian Mang</strong><span>Technical Director (TD) · Nexemeral · SM 2026–2027</span><small>Designed, built and maintains this website.</small></div>
+    <div className="priv-credit"><strong>Silang Memoirs · Nexemeral 27</strong><span>Editorial and Media team</span><small>Whose schedules, coverage and hours this workspace serves.</small></div>
+    <h5>Built with</h5>
+    <p>React · Vite · Supabase · Lucide icons · GitHub Pages · Google Sheets</p>
+    <h5>Questions or concerns</h5>
+    <p>Reach the Technical Director or the EIC through the team’s official channels.</p>
+  </>
+}
+function PrivacyNotice(){
+  const [open,setOpen]=useState(false); const [tab,setTab]=useState('privacy'); const [closing,setClosing]=useState(false)
+  const [teaser,setTeaser]=useState(()=>{ try{ return !localStorage.getItem('sm-privacy-seen') }catch{ return false } })
+  const seen=()=>{ setTeaser(false); try{ localStorage.setItem('sm-privacy-seen','1') }catch{} }
+  function openIt(t){ seen(); if(t) setTab(t); setClosing(false); setOpen(true) }
+  function closeIt(){ setClosing(true); setTimeout(()=>{ setOpen(false); setClosing(false) },260) }
+  useEffect(()=>{ if(!open) return; const k=e=>{ if(e.key==='Escape') closeIt() }; document.addEventListener('keydown',k); return ()=>document.removeEventListener('keydown',k) },[open])  // eslint-disable-line
+  return createPortal(<>
+    {teaser && !open && <div className="priv-teaser" role="note">
+      <button type="button" className="priv-x" onClick={seen} aria-label="Dismiss"><X size={14}/></button>
+      <strong><ShieldCheck size={15}/> Your data stays inside the team</strong>
+      <p>Used only for SM Media scheduling and checking hours.</p>
+      <div><button type="button" className="primary-btn" onClick={()=>openIt('privacy')}>Read notice</button><button type="button" className="secondary-btn" onClick={seen}>Got it</button></div>
+    </div>}
+    {!open && <button type="button" className="privacy-fab" onClick={()=>openIt()} aria-label="Privacy and credits"><ShieldCheck size={16}/><span>Privacy &amp; Credits</span></button>}
+    {open && <><div className={`priv-back ${closing?'out':''}`} onClick={closeIt}/>
+      <div className={`priv-panel ${closing?'out':''}`} role="dialog" aria-label="Privacy and credits">
+        <div className="priv-head"><strong><ShieldCheck size={17}/> Privacy &amp; Credits</strong><button type="button" className="priv-x" onClick={closeIt} aria-label="Close"><X size={16}/></button></div>
+        <Seg className="seg-switch priv-tabs" value={tab} onChange={setTab} options={PRIVACY_TABS}/>
+        <div className="priv-body" key={tab}><PrivacyBody tab={tab}/></div>
+        <div className="priv-foot">© 2026 Silang Memoirs · Nexemeral 27 · Built by Vum Sian Mang</div>
+      </div></>}
+  </>,document.body)
+}
+export default function App(){ return <><AppInner/><PrivacyNotice/></> }
 
 function LoadingScreen(){
   return <div className="center-screen loader-screen">
@@ -689,13 +765,51 @@ function NotificationTicker({profile,onOpen}){
     <button type="button" className="ticker-x" onClick={close} aria-label="Hide banner"><X size={14}/></button>
   </div>
 }
+// Phone / iPad / desktop alerts: asks permission, saves this device so the server can push to it even when the site is closed.
+const VAPID_PUBLIC='BIeA5ylhb9dPP1-aCS5n0u73qNC--02gIrw4m237F-VkfhYtjAHOaZslIrTTivyIeDTcSwrOk3cZLTJCjcE30Xk'
+function b64ToU8(b){ const p='='.repeat((4-b.length%4)%4); const r=atob((b+p).replace(/-/g,'+').replace(/_/g,'/')); return Uint8Array.from([...r].map(c=>c.charCodeAt(0))) }
+function PushToggle({profile}){
+  const [st,setSt]=useState('checking'); const [busy,setBusy]=useState(false)
+  const ios=/iPad|iPhone|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)
+  const standalone=window.navigator.standalone||window.matchMedia?.('(display-mode: standalone)').matches
+  useEffect(()=>{ (async()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)||!('Notification' in window)){ setSt(ios&&!standalone?'install':'unsupported'); return }
+    if(Notification.permission==='denied'){ setSt('denied'); return }
+    try{ const reg=await navigator.serviceWorker.getRegistration(); const sub=reg&&await reg.pushManager.getSubscription(); setSt(sub&&Notification.permission==='granted'?'on':'off') }catch{ setSt('off') }
+  })() },[]) // eslint-disable-line
+  async function turnOn(){
+    setBusy(true)
+    try{
+      const perm=await Notification.requestPermission(); if(perm!=='granted'){ setSt(perm==='denied'?'denied':'off'); setBusy(false); return }
+      const reg=await navigator.serviceWorker.ready
+      const sub=(await reg.pushManager.getSubscription())||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64ToU8(VAPID_PUBLIC)})
+      const j=sub.toJSON()
+      const {error}=await supabase.from('push_subscriptions').upsert({user_id:profile.id,endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,user_agent:navigator.userAgent.slice(0,200)},{onConflict:'endpoint'})
+      if(error) throw error
+      setSt('on')
+    }catch(e){ notifyDialog(String(e.message||e).includes('push_subscriptions')?'Run supabase/push.sql in the Supabase SQL editor first.':'Could not turn on alerts: '+(e.message||e)) }
+    setBusy(false)
+  }
+  async function turnOff(){
+    setBusy(true)
+    try{ const reg=await navigator.serviceWorker.getRegistration(); const sub=reg&&await reg.pushManager.getSubscription(); if(sub){ await supabase.from('push_subscriptions').delete().eq('endpoint',sub.endpoint); await sub.unsubscribe() } setSt('off') }catch{}
+    setBusy(false)
+  }
+  if(st==='checking') return null
+  const note={install:'On iPhone / iPad: tap Share → Add to Home Screen, then open the app from the icon to turn on alerts.',unsupported:'This browser cannot receive alerts.',denied:'Alerts are blocked. Allow notifications for this site in your browser settings, then reload.'}[st]
+  return <div className="push-box">
+    {st==='on' ? <button type="button" className="secondary-btn" disabled={busy} onClick={turnOff}><Bell size={16}/> Alerts on this device: ON — turn off</button>
+      : st==='off' ? <button type="button" className="primary-btn" disabled={busy} onClick={turnOn}><Bell size={16}/> {busy?'Turning on…':'Turn on alerts'}</button> : null}
+    {note && <small className="push-note">{note}</small>}
+  </div>
+}
 function NotificationsPage({profile}){
   const [rows,setRows]=useState([]); const [loading,setLoading]=useState(true)
   useEffect(()=>{ load() },[profile.id])
   async function load(){ setLoading(true); const {data}=await supabase.from('notifications').select('*').eq('user_id',profile.id).order('created_at',{ascending:false}).limit(200); setRows(data||[]); setLoading(false) }
   async function markRead(id){ await supabase.from('notifications').update({read:true}).eq('id',id); load() }
   return <div>
-    <section className="page-head"><div><div className="eyebrow">STAY IN THE LOOP</div><h1>Notifications</h1><p>Every task, event, and announcement sent your way.</p></div></section>
+    <section className="page-head"><div><div className="eyebrow">STAY IN THE LOOP</div><h1>Notifications</h1><p>Every task and event sent your way. Turn on alerts to get them on this device even when the site is closed.</p></div><PushToggle profile={profile}/></section>
     <div className="panel">
       {loading ? <div className="empty">Loading…</div> : rows.map(r=><div key={r.id} className={`notif-item ${r.read?'':'unread'}`} style={{cursor:r.read?'default':'pointer'}} onClick={()=>!r.read && markRead(r.id)}>
         <strong>{r.title}</strong>{r.body && <span>{r.body}</span>}<small>{new Date(r.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</small>
