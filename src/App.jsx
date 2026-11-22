@@ -319,58 +319,30 @@ function RetiredScreen({profile,theme,toggleTheme}){
 
 
 /* ---------------- Privacy · Terms · Copyright · Credits ---------------- */
-const PRIVACY_TABS=[['privacy','Privacy'],['terms','Terms'],['copyright','Copyright'],['credits','Credits']]
+const PRIVACY_TABS=[['privacy','Privacy'],['terms','Terms'],['credits','Credits']]
 function PrivacyBody({tab}){
   if(tab==='privacy') return <>
     <h4>Privacy Notice</h4>
-    <p>SilangMemoirs is the internal workspace of the <b>Silang Memoirs · Nexemeral 27</b> Media team. Everything stored here is used for two purposes only: <b>scheduling Media coverage</b> and <b>checking and recording members’ hours</b> (with the tasks and backups that go with them).</p>
-    <h5>What we keep</h5>
-    <p>Your name, school ID / email, position, optional profile photo, event and duty assignments, hours, tasks, notifications, and — only if you turn on alerts — a token for the device you chose.</p>
-    <h5>Internal use only</h5>
-    <p>Your information stays inside the team. It is never sold, shared, advertised with or published, and it does not leave the Silang Memoirs team.</p>
-    <h5>Who can see what</h5>
-    <p>Access follows your role. Members see their own schedule and hours; heads and officers see the team records they need to run the work; the administrator maintains the system.</p>
-    <h5>Where it is stored</h5>
-    <p>Only on the services that run this site: Supabase (database and login), GitHub Pages (website hosting), Google Sheets (backup copies kept by the team) and your browser’s push service (alerts you opt into). They act as infrastructure only.</p>
-    <h5>Safeguards</h5>
-    <p>Sign-in is required, access is role-based, passwords are stored hashed by the login provider, and idle sessions are signed out automatically. The site stores only your login session and display preferences in your browser. It has no advertising and no third-party tracking.</p>
-    <h5>Keeping and removing data</h5>
-    <p>Records are kept for the life of the Silang Memoirs project and then archived or deleted. You may ask to view, correct or remove your information at any time through the Technical Director or the EIC.</p>
-    <p className="priv-fine">This notice follows the principles of the Data Privacy Act of 2012 (Republic Act No. 10173). Last updated November 2026.</p>
+    <p>SilangMemoirs is for <b>internal use only</b>. The information here is used solely for the Silang Memoirs · Nexemeral 27 Media team’s <b>scheduling</b> and for <b>checking members’ hours</b>.</p>
+    <p>Your information stays within the team and is not shared, sold or published outside it.</p>
+    <p className="priv-fine">Handled in line with the Data Privacy Act of 2012 (Republic Act No. 10173).</p>
   </>
   if(tab==='terms') return <>
     <h4>Terms of Use</h4>
-    <p>This workspace is for authorized members of the Silang Memoirs team. By signing in you agree to:</p>
-    <ul>
-      <li>keep your login private and never share your account;</li>
-      <li>enter accurate information, including your hours and task updates;</li>
-      <li>use the records only for official Silang Memoirs work;</li>
-      <li>not copy, export or post other members’ information outside the team;</li>
-      <li>not try to reach data or features meant for another role.</li>
-    </ul>
-    <p>Access may be limited or removed by the administrators if these terms are not followed. Schedules, hours and assignments are team records and may be corrected by the officers in charge.</p>
-  </>
-  if(tab==='copyright') return <>
-    <h4>Copyright</h4>
-    <p>© 2026 <b>Silang Memoirs · Nexemeral 27</b>. All rights reserved.</p>
-    <p>The design, interface and code of this website were created by <b>Vum Sian Mang</b> for the Silang Memoirs team and may not be copied, resold or reused without written permission.</p>
-    <p>Photographs, videos, write-ups and other yearbook content belong to the Silang Memoirs team and their respective creators and subjects. They may not be reproduced or distributed without permission.</p>
-    <p>The Silang Memoirs name and logo belong to the team. Names and marks of third-party services mentioned here belong to their owners.</p>
+    <p>For authorized Silang Memoirs members only. Keep your login private, enter accurate hours, and use the records only for official team work.</p>
+    <p>Access may be limited by the administrators if these terms are not followed.</p>
   </>
   return <>
     <h4>Credits</h4>
-    <div className="priv-credit"><strong>Vum Sian Mang</strong><span>Technical Director (TD) · Nexemeral · SM 2026–2027</span><small>Designed, built and maintains this website.</small></div>
-    <div className="priv-credit"><strong>Silang Memoirs · Nexemeral 27</strong><span>Editorial and Media team</span><small>Whose schedules, coverage and hours this workspace serves.</small></div>
-    <h5>Built with</h5>
-    <p>React · Vite · Supabase · Lucide icons · GitHub Pages · Google Sheets</p>
-    <h5>Questions or concerns</h5>
-    <p>Reach the Technical Director or the EIC through the team’s official channels.</p>
+    <div className="priv-credit"><strong>Vum Sian Mang</strong><span>Technical Director (TD) · Nexemeral · SM 2026–2027</span><small>Designed and built this website.</small></div>
+    <div className="priv-credit"><strong>Silang Memoirs · Nexemeral 27</strong><span>Editorial and Media team</span></div>
   </>
 }
 function PrivacyNotice(){
   const [open,setOpen]=useState(false); const [tab,setTab]=useState('privacy'); const [closing,setClosing]=useState(false)
   const [teaser,setTeaser]=useState(()=>{ try{ return !localStorage.getItem('sm-privacy-seen') }catch{ return false } })
   const seen=()=>{ setTeaser(false); try{ localStorage.setItem('sm-privacy-seen','1') }catch{} }
+  useEffect(()=>{ if(!teaser) return; try{ localStorage.setItem('sm-privacy-seen','1') }catch{}; const t=setTimeout(()=>setTeaser(false),14000); return ()=>clearTimeout(t) },[])  // eslint-disable-line
   function openIt(t){ seen(); if(t) setTab(t); setClosing(false); setOpen(true) }
   function closeIt(){ setClosing(true); setTimeout(()=>{ setOpen(false); setClosing(false) },260) }
   useEffect(()=>{ if(!open) return; const k=e=>{ if(e.key==='Escape') closeIt() }; document.addEventListener('keydown',k); return ()=>document.removeEventListener('keydown',k) },[open])  // eslint-disable-line
@@ -387,7 +359,7 @@ function PrivacyNotice(){
         <div className="priv-head"><strong><ShieldCheck size={17}/> Privacy &amp; Credits</strong><button type="button" className="priv-x" onClick={closeIt} aria-label="Close"><X size={16}/></button></div>
         <Seg className="seg-switch priv-tabs" value={tab} onChange={setTab} options={PRIVACY_TABS}/>
         <div className="priv-body" key={tab}><PrivacyBody tab={tab}/></div>
-        <div className="priv-foot">© 2026 Silang Memoirs · Nexemeral 27 · Built by Vum Sian Mang</div>
+        <div className="priv-foot">Silang Memoirs · Nexemeral 27 · Built by Vum Sian Mang</div>
       </div></>}
   </>,document.body)
 }
