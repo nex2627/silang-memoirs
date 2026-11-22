@@ -319,21 +319,13 @@ function RetiredScreen({profile,theme,toggleTheme}){
 
 
 /* ---------------- Privacy · Terms · Copyright · Credits ---------------- */
-const PRIVACY_TABS=[['privacy','Privacy'],['terms','Terms'],['credits','Credits']]
+const PRIVACY_TABS=[['privacy','Privacy'],['credits','Credits']]
 function PrivacyBody({tab}){
   if(tab==='privacy') return <>
-    <h4>Privacy Notice</h4>
-    <p>SilangMemoirs is for <b>internal use only</b>. The information here is used solely for the Silang Memoirs · Nexemeral 27 Media team’s <b>scheduling</b> and for <b>checking members’ hours</b>.</p>
-    <p>Your information stays within the team and is not shared, sold or published outside it.</p>
+    <p>SilangMemoirs is for <b>internal use only</b>. Information here is used solely for the Silang Memoirs · Nexemeral 27 Media team’s <b>scheduling</b> and <b>checking of members’ hours</b>, and is not shared or published outside the team.</p>
     <p className="priv-fine">Handled in line with the Data Privacy Act of 2012 (Republic Act No. 10173).</p>
   </>
-  if(tab==='terms') return <>
-    <h4>Terms of Use</h4>
-    <p>For authorized Silang Memoirs members only. Keep your login private, enter accurate hours, and use the records only for official team work.</p>
-    <p>Access may be limited by the administrators if these terms are not followed.</p>
-  </>
   return <>
-    <h4>Credits</h4>
     <div className="priv-credit"><strong>Vum Sian Mang</strong><span>Technical Director (TD) · Nexemeral · SM 2026–2027</span><small>Designed and built this website.</small></div>
     <div className="priv-credit"><strong>Silang Memoirs · Nexemeral 27</strong><span>Editorial and Media team</span></div>
   </>
@@ -356,10 +348,8 @@ function PrivacyNotice(){
     {!open && <button type="button" className="privacy-fab" onClick={()=>openIt()} aria-label="Privacy and credits"><ShieldCheck size={16}/><span>Privacy &amp; Credits</span></button>}
     {open && <><div className={`priv-back ${closing?'out':''}`} onClick={closeIt}/>
       <div className={`priv-panel ${closing?'out':''}`} role="dialog" aria-label="Privacy and credits">
-        <div className="priv-head"><strong><ShieldCheck size={17}/> Privacy &amp; Credits</strong><button type="button" className="priv-x" onClick={closeIt} aria-label="Close"><X size={16}/></button></div>
-        <Seg className="seg-switch priv-tabs" value={tab} onChange={setTab} options={PRIVACY_TABS}/>
+        <div className="priv-head"><strong><ShieldCheck size={16}/></strong><Seg className="seg-switch priv-tabs" value={tab} onChange={setTab} options={PRIVACY_TABS}/><button type="button" className="priv-x" onClick={closeIt} aria-label="Close"><X size={16}/></button></div>
         <div className="priv-body" key={tab}><PrivacyBody tab={tab}/></div>
-        <div className="priv-foot">Silang Memoirs · Nexemeral 27 · Built by Vum Sian Mang</div>
       </div></>}
   </>,document.body)
 }
@@ -1650,7 +1640,7 @@ function useEventPeople(){
 function ScheduleModal({profile,onClose,onSaved,initialDate}){
   const sp=useContext(SettingsCtx).semPeriod
   const [form,setForm]=useState({title:'',description:'',location:'',date:initialDate||todayISO(),start:'',end:'',crew:{},slots:{}})
-  const people=useEventPeople(); const [busy,setBusy]=useState(false)
+  const people=useEventPeople(); const [busy,setBusy]=useState(false); const [notify,setNotify]=useState(true)
   async function save(e){ e.preventDefault()
     if(form.end<=form.start){ notifyDialog('End time must be after the start time.'); return }
     setBusy(true)
@@ -1658,7 +1648,7 @@ function ScheduleModal({profile,onClose,onSaved,initialDate}){
     const {data:sched,error}=await supabase.from('schedules').insert({ title:form.title, description:form.description||null, location:form.location||null, department:'Media', start_at, end_at, created_by:profile.id, ...(semFor(form.date,sp)?{semester:semFor(form.date,sp)}:{}), ...(Object.keys(cleanSlots(form.slots)).length?{slots:cleanSlots(form.slots)}:{}) }).select().single()
     if(error){ notifyDialog(error.message); setBusy(false); return }
     const ids=Object.keys(form.crew)
-    if(ids.length){ const {error:me}=await supabase.from('schedule_members').insert(ids.map(id=>({schedule_id:sched.id,member_id:id,duties:form.crew[id]}))); if(me) notifyDialog(me.message) }
+    if(ids.length){ const {error:me}=await supabase.from('schedule_members').insert(ids.map(id=>({schedule_id:sched.id,member_id:id,duties:form.crew[id],silent:!notify}))); if(me) notifyDialog(me.message) }
     setBusy(false); onClose(); onSaved()
   }
   return <Modal title="New event" onClose={onClose}><form onSubmit={save}>
@@ -1674,6 +1664,7 @@ function ScheduleModal({profile,onClose,onSaved,initialDate}){
     <CrewPicker people={people} value={form.crew} onChange={crew=>setForm({...form,crew})}/>
     <label>Open duties (members can claim)</label>
     <SlotsPicker value={form.slots} onChange={slots=>setForm({...form,slots})}/>
+    <label className="check-row notify-row"><input type="checkbox" checked={notify} onChange={e=>setNotify(e.target.checked)}/> Send notification to the assigned crew</label>
     <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Create event'}</button></div>
   </form></Modal>
 }
@@ -1683,7 +1674,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
   const start=new Date(schedule.start_at); const end=new Date(schedule.end_at)
   const toTime=d=>d.toTimeString().slice(0,5)
   const [form,setForm]=useState({title:schedule.title,description:schedule.description||'',location:schedule.location||'',date:localISO(start),start:toTime(start),end:toTime(end),crew:{},slots:{...(schedule.slots||{})}})
-  const people=useEventPeople(); const [busy,setBusy]=useState(false); const [before,setBefore]=useState({})
+  const people=useEventPeople(); const [busy,setBusy]=useState(false); const [before,setBefore]=useState({}); const [notify,setNotify]=useState(true)
   useEffect(()=>{ (async()=>{
     const {data:existing}=await supabase.from('schedule_members').select('member_id,duties').eq('schedule_id',schedule.id)
     const c={}; (existing||[]).forEach(m=>{ c[m.member_id]=m.duties||[] }); setBefore(c); setForm(f=>({...f,crew:c}))
@@ -1698,7 +1689,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
     const removed=have.filter(id=>!now.includes(id)); const added=now.filter(id=>!have.includes(id))
     const changed=now.filter(id=>have.includes(id) && JSON.stringify([...(before[id]||[])].sort())!==JSON.stringify([...(form.crew[id]||[])].sort()))
     if(removed.length) await supabase.from('schedule_members').delete().eq('schedule_id',schedule.id).in('member_id',removed)
-    if(added.length) await supabase.from('schedule_members').insert(added.map(id=>({schedule_id:schedule.id,member_id:id,duties:form.crew[id]})))
+    if(added.length) await supabase.from('schedule_members').insert(added.map(id=>({schedule_id:schedule.id,member_id:id,duties:form.crew[id],silent:!notify})))
     for(const id of changed) await supabase.from('schedule_members').update({duties:form.crew[id]}).eq('schedule_id',schedule.id).eq('member_id',id)
     setBusy(false); onClose(); onSaved()
   }
@@ -1715,6 +1706,7 @@ function EditScheduleModal({schedule,onClose,onSaved}){
     <CrewPicker people={people} value={form.crew} onChange={crew=>setForm({...form,crew})}/>
     <label>Open duties (members can claim)</label>
     <SlotsPicker value={form.slots} onChange={slots=>setForm({...form,slots})}/>
+    <label className="check-row notify-row"><input type="checkbox" checked={notify} onChange={e=>setNotify(e.target.checked)}/> Notify newly added crew</label>
     <div className="modal-actions"><button type="button" className="secondary-btn" onClick={onClose}>Cancel</button><button className="primary-btn" disabled={busy}>{busy?'Saving…':'Save changes'}</button></div>
   </form></Modal>
 }
