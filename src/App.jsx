@@ -908,7 +908,7 @@ function SheetLinks(){
 function Modal({title,onClose,children}){
   const [closing,setClosing]=useState(false); const box=useRef(null); const back=useRef(null); const drag=useRef({y:0,on:false,dy:0}); const done=useRef(false)
   const [tb]=useState(()=>Math.max(0,Math.round(document.querySelector('.topbar')?.getBoundingClientRect().bottom||0)))
-  useEffect(()=>{ const prev=document.body.style.overflow; document.body.style.overflow='hidden'; document.documentElement.classList.add('modal-open'); return ()=>{ document.body.style.overflow=prev; document.documentElement.classList.remove('modal-open') } },[])
+  useEffect(()=>{ const w=window; w.__smOpen=(w.__smOpen||0)+1; document.documentElement.classList.add('modal-open'); return ()=>{ w.__smOpen=Math.max(0,(w.__smOpen||1)-1); if(!w.__smOpen){ document.body.style.overflow=''; document.documentElement.classList.remove('modal-open') } } },[])
   const phone=()=>window.innerWidth<=760
   function slideOut(){ const el=box.current; if(!el) return; el.style.animation='none'; el.style.transition='transform .5s cubic-bezier(.22,1,.36,1)'; void el.offsetWidth; el.style.transform='translateY(110%)' }
   // X / tap outside: on phones the sheet slides down exactly like pulling it down; on desktop it fades.
