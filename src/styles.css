@@ -963,7 +963,7 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 @media(max-width:760px){.push-box{width:100%;align-items:stretch}.push-box .primary-btn,.push-box .secondary-btn{justify-content:center}.push-note{text-align:left}}
 
 /* Round 30: fixed fit on phones (no zoom in/out) */
-html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%;max-width:100%;overflow-x:hidden}
+html,body{-webkit-text-size-adjust:100%;text-size-adjust:100%;max-width:100%;overflow-x:clip}
 @media(pointer:coarse){
   html,body{touch-action:pan-x pan-y}
   input,select,textarea,.filter-select,.select-btn{font-size:16px!important}
