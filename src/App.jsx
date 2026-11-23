@@ -266,7 +266,7 @@ function InstallModal({onClose}){
 }
 
 /* ---------------- Root ---------------- */
-function AppInner(){
+export default function App(){
   const [session,setSession]=useState(undefined)
   const [profile,setProfile]=useState(null)
   const [theme,toggleTheme]=useTheme()
@@ -353,7 +353,6 @@ function PrivacyNotice(){
       </div></>}
   </>,document.body)
 }
-export default function App(){ return <><AppInner/><PrivacyNotice/></> }
 
 function LoadingScreen(){
   return <div className="center-screen loader-screen">
@@ -400,6 +399,7 @@ function Login({onLogin,theme,toggleTheme}){
         <button className="primary-btn wide" disabled={busy}>{busy?<><span className="loader-ring" style={{width:16,height:16,borderWidth:2}}/> Logging in…</>:'Log in'}</button>
       </form>
     </div>
+    <PrivacyNotice/>
   </div>
 }
 
