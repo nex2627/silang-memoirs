@@ -1030,11 +1030,8 @@ html.modal-open .privacy-fab,html.modal-open .priv-teaser{display:none}
 .priv-body p{margin:0 0 8px}
 .priv-credit{margin-bottom:8px;padding:10px 12px}.priv-credit strong{font-size:14px}
 
-/* the dashboard top bar stays visible above popups (desktop too) */
-.modal-backdrop{top:var(--tb,0px)}
-@media(min-width:761px){.modal{max-height:calc(100dvh - var(--tb,0px) - 56px)}}
-.notify-row{margin:4px 0 8px;padding:10px 12px;border-radius:12px;background:var(--surface-2);font-size:13px;font-weight:600}
-.notify-row input{width:18px;height:18px;accent-color:var(--ink)}
+.notify-row{display:flex;align-items:center;gap:10px;margin:4px 0 8px;padding:10px 12px;border-radius:12px;background:var(--surface-2);font-size:13px;font-weight:600;cursor:pointer}
+.notify-row input{width:18px;height:18px;flex:none;margin:0;accent-color:var(--ink)}
 
 /* privacy popup only appears on the login screen */
 .priv-teaser,.privacy-fab{z-index:5}
